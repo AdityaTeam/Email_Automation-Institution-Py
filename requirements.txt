@@ -1,0 +1,18 @@
+# Auto Email Generator - Python Dependencies
+# Flask and related
+flask==3.0.0
+werkzeug==3.0.1
+
+# MongoDB
+pymongo==4.6.0
+dnspython==2.4.2
+
+# Utilities
+python-dotenv==1.0.0
+pandas==2.1.4
+openpyxl==3.1.2
+cryptography==41.0.7
+
+# Optional packages (uncomment if needed):
+# colorama==0.4.6  # For colored terminal output
+# tqdm==4.66.1    # For progress bars
