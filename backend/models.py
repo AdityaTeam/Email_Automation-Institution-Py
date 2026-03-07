@@ -5,6 +5,7 @@ SIMPLIFIED VERSION - No encryption, plain text passwords
 """
 
 from datetime import datetime
+from unittest import result
 from bson import ObjectId
 from django import db
 from database import MongoDB, Collections
@@ -189,15 +190,23 @@ class EmailID:
         return True
     
     @staticmethod
+    @staticmethod
     def reset_counts(user_id):
-        """Reset sent counts for all user's email IDs"""
         db = MongoDB.get_db()
+
         if db is None:
             return False
-        db[Collections.EMAIL_IDS].update_many(
-            {'user_id': ObjectId(user_id)},
-            {'$set': {'emails_sent': 0}}
+
+        if not isinstance(user_id, ObjectId):
+            user_id = ObjectId(user_id)
+
+        result = db[Collections.EMAIL_IDS].update_many(
+            {"user_id": user_id},
+            {"$set": {"emails_sent": 0}}
         )
+
+        print("Reset:", result.modified_count)
+
         return True
     
     @staticmethod

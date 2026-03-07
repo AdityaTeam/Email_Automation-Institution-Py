@@ -35,12 +35,10 @@ class EmailSender:
         return self.email_accounts[self.current_account_index]
     
     def switch_account(self):
-        """Switch to the next email account"""
-        if not self.email_accounts:
-            return
+        print("🔁 Switching account...")
         self.current_account_index = (self.current_account_index + 1) % len(self.email_accounts)
         self.emails_sent_with_current_account = 0
-        print(f"\n🔄 Rotating to email account: {self.get_current_account()['email']}")
+        print("Now using:", self.email_accounts[self.current_account_index]['email'])
         
     def create_email_message(self, to_email, subject, body, from_name, is_html=False):
         """Create an email message"""
@@ -183,3 +181,17 @@ class EmailSender:
         self.emails_sent_with_current_account = 0
         self.total_sent = 0
         self.failed = []
+    
+    def set_initial_counts(self, counts_dict):
+        """
+        Set initial email counts from database values
+        
+        Args:
+            counts_dict: Dictionary mapping email address to sent count
+                         {'email1@example.com': 20, 'email2@example.com': 5}
+        """
+        for email_addr, count in counts_dict.items():
+            for account in self.email_accounts:
+                if account['email'].lower() == email_addr.lower():
+                    account['db_sent_count'] = count
+        print(f"📊 Initialized email counts: {counts_dict}")
