@@ -80,4 +80,4 @@ if __name__ == '__main__':
     print("\n🌐 Open your browser and go to: http://localhost:5000")
     print("="*60)
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)

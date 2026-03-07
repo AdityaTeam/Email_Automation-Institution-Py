@@ -355,18 +355,21 @@ ${companyWebsite}`;
         document.getElementById('previewBtn').addEventListener('click', function() {
             const subject = document.getElementById('emailSubject').value;
             let body = document.getElementById('emailBody').value;
-            
-            if (!subject || !body) { showAlert('warning', 'Please select a template'); return; }
-            
-            // Build signature from user input
+
+            if (!subject || !body) {
+                showAlert('warning', 'Please select a template');
+                return;
+            }
+
             const signature = document.getElementById('signaturePreview').textContent;
             body += '\n\n' + signature;
-            
-            let previewSubject = subject.replace('{{name}}', 'John Doe').replace('{{institute}}', 'Sample Institute');
-            let previewBody = body.replace('{{name}}', 'John Doe').replace('{{institute}}', 'Sample Institute');
-            
+
+            let previewSubject = subject;
+            let previewBody = body;
+
             document.getElementById('previewSubject').textContent = previewSubject;
             document.getElementById('previewBody').textContent = previewBody;
+
             new bootstrap.Modal(document.getElementById('previewModal')).show();
         });
         
