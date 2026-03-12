@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Updates / Release Notes</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .updates {
+            padding: 40px 30px;
+        }
+
+        .update-card {
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            padding: 30px;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .update-card:hover {
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .update-card::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 30px;
+            width: 4px;
+            height: calc(100% - 60px);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
+        }
+
+        .update-title {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+
+        .update-date {
+            color: #7f8c8d;
+            font-size: 0.95rem;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .update-description {
+            font-size: 1.1rem;
+            color: #555;
+            margin-bottom: 20px;
+            line-height: 1.7;
+        }
+
+        .update-changes {
+            list-style: none;
+        }
+
+        .update-changes li {
+            padding: 10px 0;
+            padding-left: 25px;
+            position: relative;
+            color: #444;
+        }
+
+        .update-changes li::before {
+            content: '→';
+            position: absolute;
+            left: 0;
+            color: #667eea;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .no-updates {
+            text-align: center;
+            color: #7f8c8d;
+            font-style: italic;
+            padding: 60px 20px;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .update-card {
+                padding: 25px 20px;
+                margin-bottom: 20px;
+            }
+
+            .update-title {
+                font-size: 1.4rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Project Updates / Release Notes</h1>
+            <p>Stay informed about the latest improvements and features</p>
+        </div>
+
+        <div class="updates">
+            <!-- Sample Update 1 (Newest) -->
+            <div class="update-card">
+                <div class="update-title">Email Attachment Feature Added</div>
+                <div class="update-date">December 12, 2024 10:30 AM</div>
+                <div class="update-description">
+                    Enhanced email functionality now supports file attachments for richer communication and better user experience.
+                </div>
+                <ul class="update-changes">
+                    <li>Added attachment support in admin templates and compose interface</li>
+                    <li>Implemented secure file upload handling with size limits</li>
+                    <li>Fixed email rotation bug during bulk sends</li>
+                    <li>Improved SMTP connection handling with retry logic</li>
+                </ul>
+            </div>
+
+            <!-- Sample Update 2 -->
+            <div class="update-card">
+                <div class="update-title">User Dashboard Redesign</div>
+                <div class="update-date">November 28, 2024 2:15 PM</div>
+                <div class="update-description">
+                    Completely redesigned user dashboard for better navigation and improved email management workflow.
+                </div>
+                <ul class="update-changes">
+                    <li>New responsive dashboard layout with card-based design</li>
+                    <li>Added quick actions for common tasks</li>
+                    <li>Improved email logs and upload history views</li>
+                    <li>Enhanced search functionality across email recipients</li>
+                </ul>
+            </div>
+
+            <!-- Sample Update 3 -->
+            <div class="update-card">
+                <div class="update-title">Admin Panel Security Enhancements</div>
+                <div class="update-date">November 15, 2024 9:45 AM</div>
+                <div class="update-description">
+                    Strengthened admin panel security with comprehensive authentication improvements and audit logging.
+                </div>
+                <ul class="update-changes">
+                    <li>Implemented two-factor authentication for admin users</li>
+                    <li>Added comprehensive audit logging for all admin actions</li>
+                    <li>Fixed potential XSS vulnerabilities in user detail views</li>
+                    <li>Improved session management and timeout handling</li>
+                </ul>
+            </div>
+
+            <!-- Sample Update 4 -->
+            <div class="update-card">
+                <div class="update-title">Bulk Email Performance Optimization</div>
+                <div class="update-date">October 22, 2024 4:20 PM</div>
+                <div class="update-description">
+                    Significant performance improvements for bulk email operations, reducing send times by up to 60%.
+                </div>
+                <ul class="update-changes">
+                    <li>Optimized database queries for recipient lists</li>
+                    <li>Implemented asynchronous email queuing system</li>
+                    <li>Added progress tracking for long-running sends</li>
+                    <li>Reduced memory usage during template processing</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Optional JS: Simulate new update insertion at top (for demo purposes)
+        // In real implementation, this would fetch from API/repo webhook
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Project Updates page loaded successfully');
+            console.log('Newest updates appear at the top as required');
+        });
+
+        // Demo function to add a new update (uncomment to test)
+        /*
+        function addNewUpdate() {
+            const updatesContainer = document.querySelector('.updates');
+            const newUpdate = document.createElement('div');
+            newUpdate.className = 'update-card';
+            newUpdate.innerHTML = `
+                <div class="update-title">New Test Update</div>
+                <div class="update-date">${new Date().toLocaleString()}</div>
+                <div class="update-description">This is a test update inserted at the top.</div>
+                <ul class="update-changes">
+                    <li>Test change 1</li>
+                    <li>Test change 2</li>
+                </ul>
+            `;
+            updatesContainer.insertBefore(newUpdate, updatesContainer.firstChild);
+        }
+        */
+    </script>
+</body>
+</html>

@@ -9,6 +9,7 @@ from database import MongoDB, init_db
 from routes.auth import auth_bp
 from routes.user import user_bp
 from routes.admin import admin_bp
+from routes.updates import updates_bp
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', '3c935dc77ecc7312ef3414aaf939f276')
@@ -23,6 +24,7 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.register_blueprint(auth_bp)
 app.register_blueprint(user_bp)
 app.register_blueprint(admin_bp)
+app.register_blueprint(updates_bp)
 
 
 @app.route('/')
