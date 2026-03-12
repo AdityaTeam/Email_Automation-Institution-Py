@@ -7,6 +7,8 @@ from flask import Blueprint, render_template, request, jsonify, session, redirec
 from models import User, EmailID, ExcelFile, Template, Requirement, EmailLog
 from database import MongoDB, Collections
 from bson import ObjectId
+import os
+from werkzeug.utils import secure_filename
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -274,7 +276,8 @@ def get_all_templates():
 @require_admin
 def add_template():
     """Add a new template"""
-    data = request.json
+    data = request.form
+    files = request.files.getlist('attachments')
     
     requirement_id = data.get('requirement_id')
     name = data.get('name', '').strip()
@@ -284,16 +287,33 @@ def add_template():
     if not all([requirement_id, name, subject, body]):
         return jsonify({'error': 'All fields are required'}), 400
     
+    # Handle attachments
+    attachments = []
+    ALLOWED_EXTENSIONS = {'pdf', 'docx', 'xlsx', 'pptx', 'png', 'jpg', 'jpeg', 'zip'}
+    upload_dir = 'uploads/template_attachments'
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    for file in files:
+        if file and file.filename:
+            filename = secure_filename(file.filename)
+            if '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS:
+                filepath = os.path.join(upload_dir, filename)
+                file.save(filepath)
+                attachments.append(f"uploads/template_attachments/{filename}")
+            else:
+                return jsonify({'error': f'Invalid file type: {file.filename}'}), 400
+    
     template_data = {
         'requirement_id': requirement_id,
         'name': name,
         'subject': subject,
-        'body': body
+        'body': body,
+        'attachments': attachments
     }
     
     template = Template.create(template_data)
     if template:
-        return jsonify({'success': True, 'template_id': str(template['_id'])})
+        return jsonify({'success': True, 'template_id': str(template['_id']), 'attachments': attachments})
     return jsonify({'error': 'Failed to create template'}), 400
 
 
@@ -301,7 +321,8 @@ def add_template():
 @require_admin
 def update_template(template_id):
     """Update a template"""
-    data = request.json
+    data = request.form
+    files = request.files.getlist('attachments')
     
     template_data = {
         'name': data.get('name', '').strip(),
@@ -312,8 +333,26 @@ def update_template(template_id):
     if not all([template_data['name'], template_data['subject'], template_data['body']]):
         return jsonify({'error': 'All fields are required'}), 400
     
+    # Handle attachments (replace existing)
+    attachments = []
+    ALLOWED_EXTENSIONS = {'pdf', 'docx', 'xlsx', 'pptx','png', 'jpg', 'jpeg', 'zip'}
+    upload_dir = 'uploads/template_attachments'
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    for file in files:
+        if file and file.filename:
+            filename = secure_filename(file.filename)
+            if '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS:
+                filepath = os.path.join(upload_dir, filename)
+                file.save(filepath)
+                attachments.append(f"uploads/template_attachments/{filename}")
+            else:
+                return jsonify({'error': f'Invalid file type: {file.filename}'}), 400
+    
+    template_data['attachments'] = attachments
+    
     if Template.update(template_id, template_data):
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'attachments': attachments})
     return jsonify({'error': 'Failed to update template'}), 400
 
 

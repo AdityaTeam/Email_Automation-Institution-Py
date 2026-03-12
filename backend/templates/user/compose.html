@@ -95,6 +95,13 @@
                                             </select>
                                         </div>
                                     </div>
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label class="form-label">Sender Name (From Name)</label>
+                                            <input type="text" class="form-control" id="senderName" placeholder="e.g. Hansraj Ventures (defaults to {{ username }})">
+                                            <small class="text-muted">Optional - overrides username in From header</small>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="template-info" id="templateInfo" style="display: none;">
                                     <i class="fas fa-info-circle"></i> <span id="templateInfoText"></span>
@@ -370,6 +377,19 @@ ${companyWebsite}`;
             document.getElementById('previewSubject').textContent = previewSubject;
             document.getElementById('previewBody').textContent = previewBody;
 
+            // show attachments count in preview if template selected
+            const tmpl = document.getElementById('templateSelect').value;
+            if (tmpl) {
+                const attachInfo = document.getElementById('previewAttachInfo');
+                if (!attachInfo) {
+                    const p = document.createElement('p');
+                    p.id = 'previewAttachInfo';
+                    p.className = 'mt-2';
+                    p.innerHTML = '<em>(Attachments from selected template will be included)</em>';
+                    document.getElementById('previewBody').parentNode.insertBefore(p, document.getElementById('previewBody').nextSibling);
+                }
+            }
+
             new bootstrap.Modal(document.getElementById('previewModal')).show();
         });
         
@@ -383,6 +403,9 @@ ${companyWebsite}`;
             if (!senderEmailId) { showAlert('warning', 'Please select a sender email'); return; }
             if (!fileId) { showAlert('warning', 'Please select a recipients file'); return; }
             if (!subject || !body) { showAlert('warning', 'Please select a template'); return; }
+            
+            // Get sender name
+            const senderName = document.getElementById('senderName').value.trim() || '{{ username }}';
             
             // Get signature data - backend will add signature
             const signatureData = {
@@ -406,12 +429,16 @@ ${companyWebsite}`;
             document.getElementById('progressBar').textContent = '0%';
             
             try {
-                const response = await fetch('/api/send', {
+                const selectedTemplate = document.getElementById('templateSelect').value;
+            console.log('Sending request with template_id', selectedTemplate);
+            const response = await fetch('/api/send', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         sender_email_id: senderEmailId,
+                        from_name: senderName,
                         recipients: recipients,
+                        template_id: selectedTemplate, // include so backend can attach files
                         subject: subject,
                         body: body,
                         is_html: isHtml,

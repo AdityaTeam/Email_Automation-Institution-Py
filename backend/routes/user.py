@@ -4,6 +4,7 @@ Handles user dashboard, email management, and email sending
 """
 
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
+from regex import template
 from models import EmailID, ExcelFile, Template, Requirement, EmailLog
 from database import MongoDB, Collections
 from bson import ObjectId
@@ -298,10 +299,36 @@ def send_emails():
     data = request.json
     recipients = data.get('recipients', [])
     sender_email_id = data.get('sender_email_id', '')
+    from_name = data.get('from_name', session['username'])
     subject = data.get('subject', '')
     body = data.get('body', '')
+    template_id = data.get('template_id')
+    attachments = []
     is_html = data.get('is_html', False)
     signature_data = data.get('signature_data', {})
+    
+    # debug start
+    print("send_emails called. template_id=", template_id)
+    # Fetch template attachments if template_id provided
+    if template_id:
+        template = Template.get_by_id(template_id)
+        if template and 'attachments' in template:
+            # Convert to absolute paths
+            BASE_DIR = os.path.abspath(os.getcwd())
+
+            for rel_path in template['attachments']:
+                abs_path = os.path.join(BASE_DIR, rel_path)
+
+                if os.path.exists(abs_path):
+                    attachments.append(abs_path)
+                else:
+                    print("Attachment missing:", abs_path)
+        else:
+            # no attachments key or template not found
+            print("No attachments found for template", template_id)
+
+    # debug log always show attachments list (even if empty)
+    print("Computed attachments list:", attachments)
     
     if not recipients or not sender_email_id or not subject or not body:
         return jsonify({'error': 'All fields required'}), 400
@@ -408,7 +435,8 @@ def send_emails():
                 to_email=r['email'],
                 subject=subject,
                 body=r['body'],
-                from_name=session['username'],
+                from_name=from_name,
+                attachments=attachments,
                 is_html=is_html
             )
             

@@ -8,6 +8,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
+import os 
 
 
 class EmailSender:
@@ -40,33 +41,72 @@ class EmailSender:
         self.emails_sent_with_current_account = 0
         print("Now using:", self.email_accounts[self.current_account_index]['email'])
         
-    def create_email_message(self, to_email, subject, body, from_name, is_html=False):
-        """Create an email message"""
+    def create_email_message(self, to_email, subject, body, from_name, attachments=[], is_html=False):
+        """Create an email message with optional attachments"""
         account = self.get_current_account()
         if not account:
             return None
         
-        msg = MIMEMultipart('alternative')
+        # Use 'mixed' for attachments
+        msg = MIMEMultipart('mixed')
         msg['From'] = f"{from_name} <{account['email']}>"
         msg['To'] = to_email
         msg['Subject'] = subject
         msg['Date'] = datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z')
         
+        # Create alternative for text/html
+        alt = MIMEMultipart('alternative')
         if is_html:
-            msg.attach(MIMEText(body, 'html'))
+            alt.attach(MIMEText(body, 'html'))
         else:
-            msg.attach(MIMEText(body, 'plain'))
-            
+            alt.attach(MIMEText(body, 'plain'))
+        msg.attach(alt)
+        
+        # Add attachments
+        import mimetypes
+        from email.mime.base import MIMEBase
+        from email import encoders
+        
+        # log incoming attachment paths for debugging
+        if attachments:
+            print("EmailSender will attempt to attach files:", attachments)
+        for att_path in attachments:
+            try:
+                if not os.path.exists(att_path):
+                    print(f"Attachment path does not exist: {att_path}")
+                    continue
+                with open(att_path, 'rb') as f:
+                    part = MIMEBase('application', 'octet-stream')
+                    part.set_payload(f.read())
+                
+                encoders.encode_base64(part)
+                
+                filename = os.path.basename(att_path)
+                part.add_header(
+                    'Content-Disposition',
+                    f'attachment; filename= {filename}'
+                )
+                
+                ctype, _ = mimetypes.guess_type(att_path)
+                if ctype:
+                    part.add_header('Content-Type', ctype, name=filename)
+                else:
+                    part.add_header('Content-Type', 'application/octet-stream', name=filename)
+                
+                msg.attach(part)
+            except Exception as e:
+                print(f"Failed to attach {att_path}: {e}")
+        
         return msg
     
-    def send_single_email(self, to_email, subject, body, from_name="Sender", is_html=False):
-        """Send a single email"""
+    def send_single_email(self, to_email, subject, body, from_name="Sender", attachments=[], is_html=False):
+        """Send a single email with optional attachments"""
         account = self.get_current_account()
         if not account:
             return False
         
         try:
-            msg = self.create_email_message(to_email, subject, body, from_name, is_html)
+            msg = self.create_email_message(to_email, subject, body, from_name, attachments, is_html)
             if not msg:
                 return False
             
@@ -101,7 +141,7 @@ class EmailSender:
             self.failed.append({"email": to_email, "error": str(e)})
             return False
     
-    def send_bulk_emails(self, recipients, subject, body, from_name="Sender", is_html=False, delay_between_emails=1):
+    def send_bulk_emails(self, recipients, subject, body, from_name="Sender", attachments=[], is_html=False, delay_between_emails=1):
         """
         Send emails to multiple recipients with rotation
         
@@ -110,6 +150,7 @@ class EmailSender:
             subject: Email subject
             body: Email body (plain text or HTML)
             from_name: Display name for sender
+            attachments: List of attachment file paths
             is_html: Whether body is HTML
             delay_between_emails: Delay in seconds between emails
         """
@@ -122,7 +163,8 @@ class EmailSender:
         print(f"📊 Number of accounts: {len(self.email_accounts)}")
         print(f"📧 From: {from_name}")
         print(f"📝 Subject: {subject}\n")
-        
+        print("📎 Attaching files:", attachments)
+
         for index, recipient in enumerate(recipients, 1):
             # Extract email address if recipient is a dict
             if isinstance(recipient, dict):
@@ -140,7 +182,7 @@ class EmailSender:
             # Send the email
             print(f"[{index}/{total_recipients}] Sending to {to_email}...", end=" ")
             
-            success = self.send_single_email(to_email, subject, personalized_body, from_name, is_html)
+            success = self.send_single_email(to_email, subject, personalized_body, from_name, attachments, is_html)
             
             if success:
                 print(f"✅ Sent (Account: {self.get_current_account()['email']})")

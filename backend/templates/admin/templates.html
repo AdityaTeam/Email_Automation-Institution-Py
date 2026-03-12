@@ -195,7 +195,12 @@
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Email Body</label>
-                                <textarea class="form-control" id="templateBody" rows="5" placeholder="Email body with {{name}} and {{institute}} placeholders" required></textarea>
+                                <textarea class="form-control" id="templateBody" rows="5" placeholder="Email body with {{name}} placeholders" required></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Attachments (Optional)</label>
+                                <small class="text-muted d-block mb-2">PDF, DOCX, XLSX, PPTX, PNG, JPG, ZIP (Multiple files allowed)</small>
+                                <input type="file" class="form-control" id="templateAttachments" name="attachments" multiple accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.zip">
                             </div>
                         </form>
                     </div>
@@ -228,6 +233,16 @@
                                 <strong>Subject:</strong> {{ template.subject }}<br>
                                 <strong>Body:</strong>
                                 <pre class="mt-2">{{ template.body }}</pre>
+                                {% if template.attachments and template.attachments|length > 0 %}
+                                <div class="mt-3">
+                                    <strong>Attachments ({{ template.attachments|length }}):</strong>
+                                    <ul class="list-unstyled mt-1">
+                                        {% for att in template.attachments %}
+                                        <li><i class="fas fa-paperclip text-muted me-1"></i>{{ att.split('/')[-1] }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
                             </div>
                         </div>
                         {% endfor %}
@@ -262,6 +277,11 @@
                         <div class="mb-3">
                             <label class="form-label">Body</label>
                             <textarea class="form-control" id="editTemplateBody" rows="8" required></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Attachments (Optional)</label>
+                            <small class="text-muted d-block mb-2">PDF, DOCX, XLSX, PPTX, PNG, JPG, ZIP (Multiple files allowed)</small>
+                            <input type="file" class="form-control" id="editTemplateAttachments" name="attachments" multiple accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.zip">
                         </div>
                     </form>
                 </div>
@@ -308,18 +328,21 @@
         document.getElementById('addTemplateForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            const data = {
-                requirement_id: document.getElementById('templateRequirement').value,
-                name: document.getElementById('templateName').value,
-                subject: document.getElementById('templateSubject').value,
-                body: document.getElementById('templateBody').value
-            };
+            const formData = new FormData();
+            formData.append('requirement_id', document.getElementById('templateRequirement').value);
+            formData.append('name', document.getElementById('templateName').value);
+            formData.append('subject', document.getElementById('templateSubject').value);
+            formData.append('body', document.getElementById('templateBody').value);
+            
+            const files = document.getElementById('templateAttachments').files;
+            for (let i = 0; i < files.length; i++) {
+                formData.append('attachments', files[i]);
+            }
             
             try {
                 const response = await fetch('/api/admin/templates', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
+                    body: formData
                 });
                 
                 const result = await response.json();
@@ -348,22 +371,28 @@
             document.getElementById('editTemplateSubject').value = template.subject;
             document.getElementById('editTemplateBody').value = template.body;
             
+            // Clear attachments input
+            document.getElementById('editTemplateAttachments').value = '';
+            
             new bootstrap.Modal(document.getElementById('editTemplateModal')).show();
         }
         
         async function saveTemplate() {
             const id = document.getElementById('editTemplateId').value;
-            const data = {
-                name: document.getElementById('editTemplateName').value,
-                subject: document.getElementById('editTemplateSubject').value,
-                body: document.getElementById('editTemplateBody').value
-            };
+            const formData = new FormData();
+            formData.append('name', document.getElementById('editTemplateName').value);
+            formData.append('subject', document.getElementById('editTemplateSubject').value);
+            formData.append('body', document.getElementById('editTemplateBody').value);
+            
+            const files = document.getElementById('editTemplateAttachments').files;
+            for (let i = 0; i < files.length; i++) {
+                formData.append('attachments', files[i]);
+            }
             
             try {
                 const response = await fetch(`/api/admin/templates/${id}`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
+                    body: formData
                 });
                 
                 const result = await response.json();

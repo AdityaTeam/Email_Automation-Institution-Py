@@ -409,6 +409,8 @@ class Template:
         template = db[Collections.TEMPLATES].find_one({'_id': ObjectId(template_id)})
         if template and 'signature_format' not in template:
             template['signature_format'] = Template.DEFAULT_SIGNATURE_FORMAT
+        if template and 'attachments' not in template:
+            template['attachments'] = []
         return template
     
     @staticmethod
@@ -423,6 +425,7 @@ class Template:
             'name': template_data['name'],
             'subject': template_data['subject'],
             'body': template_data['body'],
+            'attachments': template_data.get('attachments', []),
             'signature_format': template_data.get('signature_format', Template.DEFAULT_SIGNATURE_FORMAT),
             'is_active': True,
             'updated_at': datetime.utcnow()
@@ -442,6 +445,7 @@ class Template:
             'name': template_data.get('name'),
             'subject': template_data.get('subject'),
             'body': template_data.get('body'),
+            'attachments': template_data.get('attachments', []),
             'signature_format': template_data.get('signature_format', Template.DEFAULT_SIGNATURE_FORMAT),
             'updated_at': datetime.utcnow()
         }
