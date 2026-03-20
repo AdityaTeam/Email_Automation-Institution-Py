@@ -25,7 +25,6 @@ class EmailSender:
         self.email_accounts = email_accounts
         self.batch_size = batch_size
         self.current_account_index = 0
-        self.emails_sent_with_current_account = 0
         self.total_sent = 0
         self.failed = []
         
@@ -35,11 +34,53 @@ class EmailSender:
             return None
         return self.email_accounts[self.current_account_index]
     
+    def get_account_sent_count(self):
+        """Get sent count for current account from DB-synced data"""
+        current = self.get_current_account()
+        if current:
+            return current.get('emails_sent', 0)
+        return float('inf')
+    
+    def increment_current_account(self):
+        """Increment sent count for current account (DB-synced)"""
+        current = self.get_current_account()
+        if current:
+            current['emails_sent'] = current.get('emails_sent', 0) + 1
+            self.total_sent += 1
+            print(f"📊 {current['email']}: {current['emails_sent']}/25")
+    
+    def needs_rotation(self):
+        "\"\"Check if current account needs rotation (DB-driven)\"\"\""
+        count = self.get_account_sent_count()
+        print(f"🔍 {self.get_current_account()['email']}: {count}/25")
+        if count >= self.batch_size:
+            print(f"🚫 LIMIT REACHED for {self.get_current_account()['email']}")
+            return True
+        return False
+    
+    def find_next_available_account(self):
+        """Find next account with sent_count < batch_size"""
+        total_accounts = len(self.email_accounts)
+        start_index = self.current_account_index
+        
+        for i in range(total_accounts):
+            self.current_account_index = (start_index + i) % total_accounts
+            if not self.needs_rotation():
+                current = self.get_current_account()
+                print(f"✅ Selected: {current['email']} ({self.get_account_sent_count()}/25)")
+                return True
+        
+        # All accounts exhausted
+        print("🔄 ALL ACCOUNTS EXHAUSTED - Need reset!")
+        return False
+    
     def switch_account(self):
-        print("🔁 Switching account...")
-        self.current_account_index = (self.current_account_index + 1) % len(self.email_accounts)
-        self.emails_sent_with_current_account = 0
-        print("Now using:", self.email_accounts[self.current_account_index]['email'])
+        print("🔁 Rotating to next available account...")
+        if not self.find_next_available_account():
+            print("⚠️  No available accounts - reset required")
+        else:
+            print(f"🔄 Now using: {self.get_current_account()['email']}")
+
         
     def create_email_message(self, to_email, subject, body, from_name, attachments=[], is_html=False):
         """Create an email message with optional attachments"""
@@ -131,9 +172,7 @@ class EmailSender:
             server.sendmail(account['email'], to_email, msg.as_string())
             server.quit()
             
-            self.emails_sent_with_current_account += 1
-            self.total_sent += 1
-            
+            # NO increment here - handled externally after confirming rotation
             return True
             
         except Exception as e:
@@ -175,9 +214,19 @@ class EmailSender:
                 to_email = recipient
                 personalized_body = body
             
-            # Check if we need to switch account
-            if self.emails_sent_with_current_account >= self.batch_size:
-                self.switch_account()
+            # CRITICAL: Check rotation BEFORE every send (DB-driven)
+            if self.needs_rotation():
+                if not self.find_next_available_account():
+                    print("🔄 All accounts exhausted. Resetting...")
+
+                    # 🔥 Reset all counts (DB should also reset outside)
+                    for acc in self.email_accounts:
+                        acc['emails_sent'] = 0
+
+                    self.reset_counters()   
+
+                    # Try again after reset
+                    self.current_account_index = 0
             
             # Send the email
             print(f"[{index}/{total_recipients}] Sending to {to_email}...", end=" ")
@@ -186,6 +235,8 @@ class EmailSender:
             
             if success:
                 print(f"✅ Sent (Account: {self.get_current_account()['email']})")
+                # 🔥 CRITICAL FIX
+                self.increment_current_account()
             else:
                 print(f"❌ Failed")
             
@@ -218,11 +269,11 @@ class EmailSender:
                 print(f"   {fail['email']}: {fail['error']}")
     
     def reset_counters(self):
-        """Reset the counters for a new sending session"""
+        """Reset for new session (local state only - DB reset external)"""
         self.current_account_index = 0
-        self.emails_sent_with_current_account = 0
         self.total_sent = 0
         self.failed = []
+        print("🔄 EmailSender local counters reset")
     
     def set_initial_counts(self, counts_dict):
         """

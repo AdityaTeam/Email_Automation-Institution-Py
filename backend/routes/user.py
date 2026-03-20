@@ -385,51 +385,32 @@ def send_emails():
         # Set the current account index to start from selected sender
         sender.current_account_index = start_index
         
-        # Initialize the counter to match the database count for current account
-        current_account = sender.get_current_account()
-        if current_account:
-            sender.emails_sent_with_current_account = current_account.get('emails_sent', 0)
-        
         sent_count = 0
         failed_list = []
-        total_accounts = len(email_accounts)
         
         for r in personalized_recipients:
-            # Check if current account has reached its limit
-            current_acc = sender.get_current_account()
-            
-            print("Current sent:", sender.emails_sent_with_current_account)
-            print("Batch size:", BATCH_SIZE)
-            # Check if current account reached batch limit
-            if sender.emails_sent_with_current_account >= BATCH_SIZE:
-
-                switched = False
-
-                for _ in range(total_accounts):
-                    sender.switch_account()
-                    current_acc = sender.get_current_account()
-
-                    if current_acc and current_acc.get('emails_sent', 0) < BATCH_SIZE:
-                        switched = True
-                        break
-
-                # If all accounts reached limit → reset counts
-                if not switched:
-                    print("🔄 All email accounts reached limit. Resetting...")
-
+            # CRITICAL: Check rotation BEFORE every send (DB-driven)
+            if sender.needs_rotation():
+                available = sender.find_next_available_account()
+                if not available:
+                    # All accounts exhausted → RESET
+                    print("🔄 ALL ACCOUNTS EXHAUSTED - RESETTING COUNTS!")
+                    
                     EmailID.reset_counts(session['user_id'])
-
+                    
+                    # Reset ALL local account counts to sync with DB
                     for acc in email_accounts:
                         acc['emails_sent'] = 0
-
+                    
+                    # Reset EmailSender state
                     sender.current_account_index = 0
-                    sender.emails_sent_with_current_account = 0
-                    current_acc = sender.get_current_account()
             
-                # If still no valid account, skip this recipient
-                if not current_acc:
-                    failed_list.append({'email': r['email'], 'error': 'No available sender email'})
-                    continue
+            current_acc = sender.get_current_account()
+            if not current_acc:
+                failed_list.append({'email': r['email'], 'error': 'No available sender'})
+                continue
+            
+            print(f"📧 Using {current_acc['email']} ({sender.get_account_sent_count()}/25)")
             
             success = sender.send_single_email(
                 to_email=r['email'],
@@ -440,23 +421,19 @@ def send_emails():
                 is_html=is_html
             )
             
-            if success and current_acc:
-                # increase sender internal counter
-                sender.emails_sent_with_current_account += 1
-
-                # increment database count
+            if success:
+                # SINGLE increment after successful send (DB + local sync)
+                sender.increment_current_account()
                 EmailID.increment_sent_count(current_acc['_id'])
-
-                # update local count
-                current_acc['emails_sent'] = current_acc.get('emails_sent', 0) + 1
-
+                
                 EmailLog.create(session['user_id'], current_acc['_id'], r['email'], subject, 'sent')
-
                 sent_count += 1
+                print(f"✅ Sent #{sent_count} via {current_acc['email']}")
             else:
                 error_msg = sender.failed[-1]['error'] if sender.failed else 'Unknown'
                 EmailLog.create(session['user_id'], sender_email_id, r['email'], subject, 'failed', error_msg)
                 failed_list.append({'email': r['email'], 'error': error_msg})
+                print(f"❌ Failed: {error_msg}")
         
         return jsonify({'success': True, 'sent': sent_count, 'failed': len(failed_list), 'failed_list': failed_list})
     except Exception as e:

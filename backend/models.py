@@ -193,7 +193,6 @@ class EmailID:
     @staticmethod
     def reset_counts(user_id):
         db = MongoDB.get_db()
-
         if db is None:
             return False
 
@@ -204,9 +203,7 @@ class EmailID:
             {"user_id": user_id},
             {"$set": {"emails_sent": 0}}
         )
-
-        print("Reset:", result.modified_count)
-
+        print(f"🔄 RESET DB COUNTS: {result.modified_count} accounts → 0/25")
         return True
     
     @staticmethod
