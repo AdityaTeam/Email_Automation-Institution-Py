@@ -145,6 +145,9 @@
                     <a class="nav-link" href="/admin/templates">
                         <i class="fas fa-file-alt"></i> Templates
                     </a>
+                    <a class="nav-link" href="/admin/cc">
+                        <i class="fas fa-copy"></i> CC Emails
+                    </a>
                     <a class="nav-link" href="/admin/logs">
                         <i class="fas fa-history"></i> Logs
                     </a>
@@ -152,6 +155,7 @@
                         <i class="fas fa-sign-out-alt"></i> Logout
                     </a>
                 </nav>
+
             </div>
             
             <!-- Main Content -->
@@ -244,6 +248,28 @@
                     </div>
                 </div>
                 
+                <!-- CC Emails Management - NEW FEATURE -->
+                <div class="row mb-4">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-users-cog"></i> CC Emails Management</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="input-group mb-3">
+                                    <input type="email" id="newCcEmail" class="form-control" placeholder="Add new CC email (admin@example.com)">
+                                    <button class="btn btn-success" onclick="addCcEmail()">
+                                        <i class="fas fa-plus"></i> Add
+                                    </button>
+                                </div>
+                                <div id="ccEmailsList" class="list-group">
+                                    <!-- CC emails populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Recent Logs -->
                 <div class="row">
                     <div class="col-md-12">
@@ -252,6 +278,7 @@
                                 <span><i class="fas fa-history"></i> Recent Email Activity</span>
                                 <a href="/admin/logs" class="btn btn-sm btn-primary">View All</a>
                             </div>
+
                             <div class="card-body">
                                 {% if recent_logs %}
                                 <div class="table-responsive">
@@ -294,5 +321,83 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Load CC emails on page load
+        async function loadCcEmails() {
+            try {
+                const response = await fetch('/api/admin/cc-emails');
+                const data = await response.json();
+                const list = document.getElementById('ccEmailsList');
+                list.innerHTML = '';
+                
+                if (data.cc_emails && data.cc_emails.length > 0) {
+                    data.cc_emails.forEach(cc => {
+                        const item = document.createElement('div');
+                        item.className = 'list-group-item d-flex justify-content-between align-items-center';
+                        item.innerHTML = `
+                            <span>${cc.email}</span>
+                            <button class="btn btn-sm btn-danger" onclick="deleteCcEmail('${cc._id}')">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        `;
+                        list.appendChild(item);
+                    });
+                } else {
+                    list.innerHTML = '<div class="list-group-item text-muted text-center">No CC emails added</div>';
+                }
+            } catch (error) {
+                console.error('Error loading CC emails:', error);
+            }
+        }
+
+        function addCcEmail() {
+            const email = document.getElementById('newCcEmail').value.trim();
+            if (!email || !email.includes('@')) {
+                alert('Please enter a valid email');
+                return;
+            }
+
+            fetch('/api/admin/cc-emails', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({email: email})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('newCcEmail').value = '';
+                    loadCcEmails();
+                } else {
+                    alert(data.error || 'Failed to add CC email');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error adding CC email');
+            });
+        }
+
+        function deleteCcEmail(ccId) {
+            if (!confirm('Delete this CC email?')) return;
+            
+            fetch(`/api/admin/cc-emails/${ccId}`, {method: 'DELETE'})
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    loadCcEmails();
+                } else {
+                    alert(data.error || 'Failed to delete');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error deleting CC email');
+            });
+        }
+
+        // Load on page ready
+        document.addEventListener('DOMContentLoaded', loadCcEmails);
+    </script>
 </body>
 </html>
+

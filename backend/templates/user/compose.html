@@ -97,6 +97,22 @@
                                     </div>
                                     <div class="col-md-4">
                                         <div class="mb-3">
+                                            <label class="form-label">CC Emails <small class="text-muted">(Select multiple)</small></label>
+                                            <div class="dropdown">
+                                                <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start" type="button" id="ccDropdownBtn" data-bs-toggle="dropdown">
+                                                    <i class="fas fa-copy me-2"></i> CC: <span id="ccSelectedCount">0 selected</span>
+                                                </button>
+                                                <ul class="dropdown-menu w-100 p-2" id="ccDropdownMenu" style="max-height: 200px; overflow-y: auto;">
+                                                    <!-- Checkboxes populated by JS -->
+                                                </ul>
+                                            </div>
+                                            <input type="hidden" id="ccEmailsHidden" name="cc_emails">
+                                        </div>
+                                    </div>
+
+
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
                                             <label class="form-label">Sender Name (From Name)</label>
                                             <input type="text" class="form-control" id="senderName" placeholder="e.g. Hansraj Ventures (defaults to {{ username }})">
                                             <small class="text-muted">Optional - overrides username in From header</small>
@@ -118,7 +134,7 @@
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label">Email Body <span class="badge bg-secondary">Read Only</span></label>
-                                    <small class="text-muted d-block mb-2">Use <code>{{name}}</code> for recipient name and <code>{{institute}}</code> for institute name</small>
+                                    <small class="text-muted d-block mb-2">Use <code>{{name}}</code> for recipient name </small>
                                     <textarea class="form-control read-only-field" id="emailBody" rows="10" readonly placeholder="Select a template"></textarea>
                                 </div>
                                 
@@ -399,6 +415,8 @@ ${companyWebsite}`;
             const subject = document.getElementById('emailSubject').value;
             let body = document.getElementById('emailBody').value;
             const isHtml = document.getElementById('htmlFormat').checked;
+            const ccEmailsHidden = document.getElementById('ccEmailsHidden').value;
+            const ccEmails = ccEmailsHidden ? ccEmailsHidden.split(',').filter(email => email.trim()) : [];
             
             if (!senderEmailId) { showAlert('warning', 'Please select a sender email'); return; }
             if (!fileId) { showAlert('warning', 'Please select a recipients file'); return; }
@@ -430,22 +448,28 @@ ${companyWebsite}`;
             
             try {
                 const selectedTemplate = document.getElementById('templateSelect').value;
-            console.log('Sending request with template_id', selectedTemplate);
-            const response = await fetch('/api/send', {
+                console.log('Sending with CC:', ccEmails);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s timeout
+                
+                const response = await fetch('/api/send', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         sender_email_id: senderEmailId,
                         from_name: senderName,
                         recipients: recipients,
-                        template_id: selectedTemplate, // include so backend can attach files
+                        cc_emails: ccEmails,  // ✅ Fixed: Use actual CC selection
+                        template_id: selectedTemplate,
                         subject: subject,
                         body: body,
                         is_html: isHtml,
                         signature_data: signatureData
-                    })
+                    }),
+                    signal: controller.signal
                 });
                 
+                clearTimeout(timeoutId);
                 const data = await response.json();
                 document.getElementById('loadingOverlay').classList.remove('active');
                 
@@ -460,10 +484,79 @@ ${companyWebsite}`;
                 }
             } catch (error) {
                 document.getElementById('loadingOverlay').classList.remove('active');
-                showAlert('danger', 'Error sending emails');
+                if (error.name === 'AbortError') {
+                    showAlert('warning', 'Request timeout. Check server logs.');
+                } else {
+                    console.error('Send error:', error);
+                    showAlert('danger', 'Network error. Check console.');
+                }
             }
         });
         
+        // ✅ FIXED: Populate CC dropdown checkboxes
+        let ccCheckboxes = []; // Track checkboxes for selection management
+        
+        async function populateCcDropdown() {
+            const menu = document.getElementById('ccDropdownMenu');
+            const countEl = document.getElementById('ccSelectedCount');
+            const hiddenInput = document.getElementById('ccEmailsHidden');
+            
+            try {
+                const response = await fetch('/api/cc-emails');
+                const data = await response.json();
+                console.log('CC API response:', data); // Debug
+                
+                menu.innerHTML = ''; // Clear existing
+                ccCheckboxes = [];
+                
+                if (data.cc_emails && data.cc_emails.length > 0) {
+                    data.cc_emails.forEach((cc, index) => {
+                        const li = document.createElement('li');
+                        li.innerHTML = `
+                            <div class="form-check">
+                                <input class="form-check-input cc-checkbox" type="checkbox" 
+                                       id="cc_${index}" value="${cc.email}" data-email="${cc.email}">
+                                <label class="form-check-label" for="cc_${index}">
+                                    ${cc.email}
+                                </label>
+                            </div>
+                        `;
+                        menu.appendChild(li);
+                        
+                        // Store checkbox reference
+                        const checkbox = li.querySelector('.cc-checkbox');
+                        ccCheckboxes.push(checkbox);
+                        
+                        // Add change listener
+                        checkbox.addEventListener('change', updateCcSelection);
+                    });
+                    console.log(`✅ Loaded ${data.cc_emails.length} CC emails`);
+                } else {
+                    menu.innerHTML = '<li class="dropdown-item text-center text-muted p-3">No CC emails available</li>';
+                    console.log('No CC emails found');
+                }
+                updateCcSelection(); // Initial count
+            } catch (error) {
+                console.error('Error loading CC emails:', error);
+                menu.innerHTML = '<li class="dropdown-item text-center text-danger p-3">Failed to load CC emails</li>';
+            }
+        }
+        
+        function updateCcSelection() {
+            const selected = ccCheckboxes.filter(cb => cb.checked);
+            const countEl = document.getElementById('ccSelectedCount');
+            const hiddenInput = document.getElementById('ccEmailsHidden');
+            
+            countEl.textContent = `${selected.length} selected`;
+            hiddenInput.value = selected.map(cb => cb.value).join(',');
+            
+            console.log(`CC selection: ${selected.length} emails - ${hiddenInput.value}`);
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            populateCcDropdown();
+        });
+
         function showAlert(type, message) {
             const alertDiv = document.createElement('div');
             alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
@@ -474,3 +567,4 @@ ${companyWebsite}`;
     </script>
 </body>
 </html>
+

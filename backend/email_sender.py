@@ -9,24 +9,25 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 import os 
+from email.mime.image import MIMEImage
+import time
 
 
 class EmailSender:
-    """Email sender with automatic rotation between multiple accounts"""
+    """Email sender with SMTP pooling & Gmail-safe rotation"""
     
-    def __init__(self, email_accounts, batch_size=25):
+    def __init__(self, email_accounts, batch_size=15):
         """
-        Initialize the email sender with accounts and batch size
-        
-        Args:
-            email_accounts: List of email account dictionaries
-            batch_size: Number of emails per account before rotation (default: 25)
+        Initialize with Gmail-safe batch_size=15
         """
         self.email_accounts = email_accounts
         self.batch_size = batch_size
         self.current_account_index = 0
         self.total_sent = 0
         self.failed = []
+        self.server = None  # SMTP Connection Pooling
+        self.current_account = None
+        self.last_rotation = 0
         
     def get_current_account(self):
         """Get the current email account to use"""
@@ -82,105 +83,186 @@ class EmailSender:
             print(f"🔄 Now using: {self.get_current_account()['email']}")
 
         
-    def create_email_message(self, to_email, subject, body, from_name, attachments=[], is_html=False):
-        """Create an email message with optional attachments"""
+
+    def create_email_message(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=[]):
+        """Create email message (PLAIN TEXT + LOGO ATTACHMENT)"""
+
         account = self.get_current_account()
         if not account:
             return None
-        
-        # Use 'mixed' for attachments
-        msg = MIMEMultipart('mixed')
+
+        msg = MIMEMultipart()
         msg['From'] = f"{from_name} <{account['email']}>"
         msg['To'] = to_email
+
+        if cc_emails:
+            msg['Cc'] = ", ".join(cc_emails)
+
         msg['Subject'] = subject
         msg['Date'] = datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z')
-        
-        # Create alternative for text/html
-        alt = MIMEMultipart('alternative')
-        if is_html:
-            alt.attach(MIMEText(body, 'html'))
+
+        # ✅ Plain text only
+        msg.attach(MIMEText(body, 'plain'))
+
+        # ✅ Attach LOGO from folder
+        logo_path = os.path.join(os.getcwd(), "backend", "uploads", "logo", "company_logo.jpeg")
+        if os.path.exists(logo_path):
+            try:
+                with open(logo_path, 'rb') as f:
+                    img = MIMEImage(f.read())
+                    img.add_header('Content-Disposition', 'attachment', filename="company_logo.jpeg")
+                    msg.attach(img)
+                    print("✅ Logo attached")
+            except Exception as e:
+                print("❌ Logo attach error:", e)
         else:
-            alt.attach(MIMEText(body, 'plain'))
-        msg.attach(alt)
-        
-        # Add attachments
+            print("⚠️ Logo not found at:", logo_path)
+
+        # ✅ Attach files
         import mimetypes
         from email.mime.base import MIMEBase
         from email import encoders
-        
-        # log incoming attachment paths for debugging
-        if attachments:
-            print("EmailSender will attempt to attach files:", attachments)
+
         for att_path in attachments:
             try:
                 if not os.path.exists(att_path):
-                    print(f"Attachment path does not exist: {att_path}")
+                    print(f"❌ File not found: {att_path}")
                     continue
-                with open(att_path, 'rb') as f:
-                    part = MIMEBase('application', 'octet-stream')
-                    part.set_payload(f.read())
-                
+
+                with open(att_path, "rb") as f:
+                    file_data = f.read()
+
+                mime_type, _ = mimetypes.guess_type(att_path)
+                if mime_type:
+                    main_type, sub_type = mime_type.split("/")
+                else:
+                    main_type, sub_type = "application", "octet-stream"
+
+                part = MIMEBase(main_type, sub_type)
+                part.set_payload(file_data)
+
                 encoders.encode_base64(part)
-                
+
                 filename = os.path.basename(att_path)
                 part.add_header(
-                    'Content-Disposition',
-                    f'attachment; filename= {filename}'
+                    "Content-Disposition",
+                    f'attachment; filename="{filename}"'
                 )
-                
-                ctype, _ = mimetypes.guess_type(att_path)
-                if ctype:
-                    part.add_header('Content-Type', ctype, name=filename)
-                else:
-                    part.add_header('Content-Type', 'application/octet-stream', name=filename)
-                
+
                 msg.attach(part)
+                print(f"✅ Attached: {filename}")
+
             except Exception as e:
-                print(f"Failed to attach {att_path}: {e}")
-        
+                print(f"❌ Attachment error: {e}")
         return msg
     
-    def send_single_email(self, to_email, subject, body, from_name="Sender", attachments=[], is_html=False):
-        """Send a single email with optional attachments"""
-        account = self.get_current_account()
-        if not account:
-            return False
+    def ensure_connection(self):
+        """Pool-aware connection validation/reconnect"""
+        import time
+        import socket
         
+        if self.current_account is None:
+            return False
+            
+        # Rotation cooldown
+        if time.time() - self.last_rotation < 30:
+            time.sleep(30 - (time.time() - self.last_rotation))
+        
+        # Validate existing connection
+        if self.server and self.current_account:
+            try:
+                self.server.noop()
+                self.server.rset()
+                return True
+            except:
+                print("🔌 Stale connection → Reconnecting...")
+                self.server = None
+        
+        # Create/connect new pooled connection
         try:
-            msg = self.create_email_message(to_email, subject, body, from_name, attachments, is_html)
-            if not msg:
-                return False
+            # socket.setdefaulttimeout(120.0)
+            smtp_server = self.current_account.get('smtp_server', 'smtp.gmail.com')
+            smtp_port = self.current_account.get('smtp_port', 587)
+            use_ssl = self.current_account.get('use_ssl', False)
+            use_tls = self.current_account.get('use_tls', True)
             
-            # Get connection settings
-            smtp_server = account.get('smtp_server', 'smtp.gmail.com')
-            smtp_port = account.get('smtp_port', 587)
-            use_ssl = account.get('use_ssl', False)
-            use_tls = account.get('use_tls', True)
+            print(f"🔌 Pool connect: {smtp_server}:{smtp_port}")
             
-            # Connect to SMTP server based on SSL/TLS settings
             if use_ssl:
-                # Use SSL connection (implicit SSL on connection)
-                server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+                self.server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=120)
             else:
-                # Regular connection (with optional TLS)
-                server = smtplib.SMTP(smtp_server, smtp_port)
+                self.server = smtplib.SMTP(smtp_server, smtp_port, timeout=120)
+                self.server.ehlo()
                 if use_tls:
-                    server.starttls()
+                    self.server.starttls()
+                    self.server.ehlo()
             
-            # Login and send
-            server.login(account['email'], account['password'])
-            server.sendmail(account['email'], to_email, msg.as_string())
-            server.quit()
-            
-            # NO increment here - handled externally after confirming rotation
+            self.server.login(self.current_account['email'], self.current_account['password'])
+            print("✅ Pooled connection ready")
             return True
             
         except Exception as e:
-            print(f"❌ Failed to send to {to_email}: {str(e)}")
-            self.failed.append({"email": to_email, "error": str(e)})
+            print(f"❌ Pool connect failed: {e}")
+            self.server = None
             return False
     
-    def send_bulk_emails(self, recipients, subject, body, from_name="Sender", attachments=[], is_html=False, delay_between_emails=1):
+    def send_single_email(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=[]):
+        """Send using pooled connection + validation"""
+        import socket
+        
+        # ✅ FIX: set current account
+        self.current_account = self.get_current_account()
+
+        if not self.ensure_connection():
+            print("❌ Cannot establish pooled connection")
+            return False
+        
+        try:
+            # Message prep
+            msg = self.create_email_message(to_email, subject, body, from_name, cc_emails, attachments)
+            if not msg:
+                return False
+            
+            recipients = [to_email]
+            if cc_emails:
+                recipients.extend(cc_emails)
+            
+            print(f"📤 Pool send → {to_email}")
+            
+            # Final validation + reset
+            self.server.noop()
+            self.server.rset()
+            
+            # Triple retry with backoff
+            for attempt in range(3):
+                try:
+                    self.server.sendmail(
+                        self.current_account['email'], 
+                        recipients, 
+                        msg.as_string()
+                    )
+                    print("✅ Pooled send success")
+                    self.server.quit()
+                    self.server = None  # Force new connection for next send
+                    return True
+                except smtplib.SMTPServerDisconnected as e:
+                    print(f"🔄 Pool retry {attempt+1}/3: {e}")
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                    self.ensure_connection()
+                    continue
+            
+            print("❌ All retries exhausted")
+            return False
+            
+        except Exception as e:
+            print(f"❌ Pool send error: {e}")
+            self.server = None
+            return False
+        finally:
+            socket.setdefaulttimeout(None)
+
+    
+    def send_bulk_emails(self, recipients, subject, body, from_name="Sender", cc_emails=None, attachments=[], is_html=False, delay_between_emails=1):
         """
         Send emails to multiple recipients with rotation
         
@@ -231,7 +313,14 @@ class EmailSender:
             # Send the email
             print(f"[{index}/{total_recipients}] Sending to {to_email}...", end=" ")
             
-            success = self.send_single_email(to_email, subject, personalized_body, from_name, attachments, is_html)
+            success = self.send_single_email(
+                to_email,
+                subject,
+                personalized_body,
+                from_name,
+                cc_emails=cc_emails,      # ✅ correct
+                attachments=attachments   # ✅ correct
+            )
             
             if success:
                 print(f"✅ Sent (Account: {self.get_current_account()['email']})")

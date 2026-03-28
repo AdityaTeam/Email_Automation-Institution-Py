@@ -5,9 +5,8 @@ SIMPLIFIED VERSION - No encryption, plain text passwords
 """
 
 from datetime import datetime
-from unittest import result
+from datetime import datetime
 from bson import ObjectId
-from django import db
 from database import MongoDB, Collections
 
 
@@ -190,7 +189,6 @@ class EmailID:
         return True
     
     @staticmethod
-    @staticmethod
     def reset_counts(user_id):
         db = MongoDB.get_db()
         if db is None:
@@ -205,6 +203,7 @@ class EmailID:
         )
         print(f"🔄 RESET DB COUNTS: {result.modified_count} accounts → 0/25")
         return True
+
     
     @staticmethod
     def delete(email_id):
@@ -368,8 +367,9 @@ class Requirement:
 class Template:
     """Template model and helper functions"""
     
-    # Default signature format - fixed structure
-    DEFAULT_SIGNATURE_FORMAT = """Best Regards,
+# Default signature format - Plain text
+    DEFAULT_SIGNATURE_FORMAT = """
+Best Regards,
 {{executive_name}}
 {{position}}
 {{company_name}}
@@ -404,10 +404,11 @@ class Template:
         if db is None:
             return None
         template = db[Collections.TEMPLATES].find_one({'_id': ObjectId(template_id)})
-        if template and 'signature_format' not in template:
+        if template:
+            # Always use the current default signature format
             template['signature_format'] = Template.DEFAULT_SIGNATURE_FORMAT
-        if template and 'attachments' not in template:
-            template['attachments'] = []
+            if 'attachments' not in template:
+                template['attachments'] = []
         return template
     
     @staticmethod
@@ -495,12 +496,53 @@ class Template:
         return body
 
 
-class EmailLog:
-    """Email Log model and helper functions"""
+class CcEmail:
+    """CC Email model and helper functions"""
     
     @staticmethod
+    def get_all():
+        """Get all CC emails"""
+        db = MongoDB.get_db()
+        if db is None:
+            print("DEBUG: Database connection failed")
+            return []
+        try:
+            result = list(db[Collections.CC_EMAILS].find().sort('created_at', -1))
+            print(f"DEBUG: Found {len(result)} CC emails in collection {Collections.CC_EMAILS}")
+            return result
+        except Exception as e:
+            print(f"DEBUG: Error querying CC emails: {e}")
+            return []
+    
+    @staticmethod
+    def create(email):
+        """Create a new CC email"""
+        db = MongoDB.get_db()
+        if db is None:
+            return None
+        
+        cc_data = {
+            'email': email.strip(),
+            'created_at': datetime.utcnow()
+        }
+        result = db[Collections.CC_EMAILS].insert_one(cc_data)
+        cc_data['_id'] = result.inserted_id
+        return cc_data
+    
+    @staticmethod
+    def delete(cc_id):
+        """Delete a CC email"""
+        db = MongoDB.get_db()
+        if db is None:
+            return False
+        result = db[Collections.CC_EMAILS].delete_one({'_id': ObjectId(cc_id)})
+        return result.deleted_count > 0
+
+class EmailLog:
+    """Email Log model and helper functions"""
+
+    @staticmethod
     def create(user_id, sender_email_id, recipient_email, subject, status, error_message=None):
-        """Create a new email log"""
         db = MongoDB.get_db()
         if db is None:
             return None
@@ -517,28 +559,114 @@ class EmailLog:
         result = db[Collections.EMAIL_LOGS].insert_one(log_data)
         log_data['_id'] = result.inserted_id
         return log_data
-    
+
     @staticmethod
-    def get_by_user(user_id, limit=100):
-        """Get email logs for a user"""
+    def get_by_user_paginated(user_id, page=1, limit=100):
         db = MongoDB.get_db()
         if db is None:
             return []
+        skip = (page - 1) * limit
         return list(db[Collections.EMAIL_LOGS].find({
             'user_id': ObjectId(user_id)
-        }).sort('sent_at', -1).limit(limit))
-    
+        }).sort('sent_at', -1).skip(skip).limit(limit))
+
     @staticmethod
-    def get_all(limit=100):
-        """Get all email logs (admin)"""
+    def get_all_paginated(page=1, limit=100):
         db = MongoDB.get_db()
         if db is None:
             return []
-        return list(db[Collections.EMAIL_LOGS].find().sort('sent_at', -1).limit(limit))
-    
+        skip = (page - 1) * limit
+        return list(db[Collections.EMAIL_LOGS].find()
+                   .sort('sent_at', -1).skip(skip).limit(limit))
+
+    @staticmethod
+    def get_count(user_id=None):
+        db = MongoDB.get_db()
+        if db is None:
+            return 0
+        query = {} if user_id is None else {'user_id': ObjectId(user_id)}
+        return db[Collections.EMAIL_LOGS].count_documents(query)
+
+    @staticmethod
+    def get_by_user(user_id, limit=100):
+        return EmailLog.get_by_user_paginated(user_id, page=1, limit=limit)
+
+    @staticmethod
+    def get_all(limit=100):
+        return EmailLog.get_all_paginated(page=1, limit=limit)
+
     @staticmethod
     def get_stats(user_id=None):
-        """Get email statistics"""
+        db = MongoDB.get_db()
+        if db is None:
+            return {'sent': 0, 'failed': 0}
+        
+        query = {}
+        if user_id:
+            query['user_id'] = ObjectId(user_id)
+        
+        sent = db[Collections.EMAIL_LOGS].count_documents({**query, 'status': 'sent'})
+        failed = db[Collections.EMAIL_LOGS].count_documents({**query, 'status': 'failed'})
+        
+        return {'sent': sent, 'failed': failed}
+
+
+    @staticmethod
+    def create(user_id, sender_email_id, recipient_email, subject, status, error_message=None):
+        db = MongoDB.get_db()
+        if db is None:
+            return None
+        
+        log_data = {
+            'user_id': ObjectId(user_id),
+            'sender_email_id': ObjectId(sender_email_id),
+            'recipient_email': recipient_email,
+            'subject': subject,
+            'status': status,
+            'error_message': error_message,
+            'sent_at': datetime.utcnow()
+        }
+        result = db[Collections.EMAIL_LOGS].insert_one(log_data)
+        log_data['_id'] = result.inserted_id
+        return log_data
+
+    @staticmethod
+    def get_by_user_paginated(user_id, page=1, limit=100):
+        db = MongoDB.get_db()
+        if db is None:
+            return []
+        skip = (page - 1) * limit
+        return list(db[Collections.EMAIL_LOGS].find({
+            'user_id': ObjectId(user_id)
+        }).sort('sent_at', -1).skip(skip).limit(limit))
+
+    @staticmethod
+    def get_all_paginated(page=1, limit=100):
+        db = MongoDB.get_db()
+        if db is None:
+            return []
+        skip = (page - 1) * limit
+        return list(db[Collections.EMAIL_LOGS].find()
+                   .sort('sent_at', -1).skip(skip).limit(limit))
+
+    @staticmethod
+    def get_count(user_id=None):
+        db = MongoDB.get_db()
+        if db is None:
+            return 0
+        query = {} if user_id is None else {'user_id': ObjectId(user_id)}
+        return db[Collections.EMAIL_LOGS].count_documents(query)
+
+    @staticmethod
+    def get_by_user(user_id, limit=100):
+        return EmailLog.get_by_user_paginated(user_id, page=1, limit=limit)
+
+    @staticmethod
+    def get_all(limit=100):
+        return EmailLog.get_all_paginated(page=1, limit=limit)
+
+    @staticmethod
+    def get_stats(user_id=None):
         db = MongoDB.get_db()
         if db is None:
             return {'sent': 0, 'failed': 0}

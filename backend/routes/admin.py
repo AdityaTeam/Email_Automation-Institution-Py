@@ -14,15 +14,26 @@ admin_bp = Blueprint('admin', __name__)
 
 
 def require_admin(f):
-    """Decorator to require admin role"""
     from functools import wraps
+    from flask import request, jsonify
+
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('auth.login'))
-        if session.get('role') != 'admin':
-            return redirect(url_for('user.dashboard'))
+        # If API request → return JSON error
+        if request.path.startswith('/api/'):
+            if 'user_id' not in session:
+                return jsonify({'error': 'Unauthorized'}), 401
+            if session.get('role') != 'admin':
+                return jsonify({'error': 'Forbidden'}), 403
+        else:
+            # Normal page routes
+            if 'user_id' not in session:
+                return redirect(url_for('auth.login'))
+            if session.get('role') != 'admin':
+                return redirect(url_for('user.dashboard'))
+
         return f(*args, **kwargs)
+
     return decorated_function
 
 
@@ -114,6 +125,16 @@ def view_user(user_id):
     excel_files = ExcelFile.get_by_user(user_id)
     logs = EmailLog.get_by_user(user_id, limit=50)
     stats = EmailLog.get_stats(user_id)
+    
+    # Convert ObjectIds to strings for template
+    for eid in email_ids:
+        eid['_id'] = str(eid['_id'])
+    for file in excel_files:
+        file['_id'] = str(file['_id'])
+    for log in logs:
+        log['_id'] = str(log['_id'])
+        log['user_id'] = str(log['user_id'])
+        log['sender_email_id'] = str(log.get('sender_email_id', ''))
     
     # Get sender emails for logs
     email_id_map = {str(eid['_id']): eid['email'] for eid in email_ids}
@@ -401,8 +422,12 @@ def logs():
 @admin_bp.route('/api/admin/logs', methods=['GET'])
 @require_admin
 def get_all_logs():
-    """Get all email logs"""
-    logs_list = EmailLog.get_all(limit=100)
+    """Get paginated email logs (FEATURE 2)"""
+    page = int(request.args.get('page', 1))
+    limit = int(request.args.get('limit', 100))
+    logs_list = EmailLog.get_all_paginated(page, limit)
+    
+    total_count = EmailLog.get_count()
     
     users = User.get_all()
     user_map = {str(u['_id']): u['username'] for u in users}
@@ -419,11 +444,116 @@ def get_all_logs():
         log['username'] = user_map.get(log['user_id'], 'Unknown')
         log['sender_email_id'] = str(log.get('sender_email_id', ''))
         log['sender_email'] = all_email_ids.get(str(log.get('sender_email_id')), 'Unknown')
+        # Ensure sent_at is a string
+        if 'sent_at' in log and log['sent_at']:
+            log['sent_at'] = log['sent_at'].isoformat() if hasattr(log['sent_at'], 'isoformat') else str(log['sent_at'])
     
-    return jsonify({'logs': logs_list})
+    return jsonify({
+        'logs': logs_list, 
+        'total': total_count,
+        'page': page, 
+        'limit': limit,
+        'total_pages': (total_count + limit - 1) // limit
+    })
 
 
 # ==================== Statistics ====================
+
+@admin_bp.route('/api/admin/cc-emails', methods=['GET'])
+@require_admin
+def get_cc_emails():
+    print("🔍 DEBUG API: /api/admin/cc-emails GET called")
+    from models import CcEmail
+    
+    cc_emails = CcEmail.get_all()
+    print(f"🔍 DEBUG API: CcEmail.get_all() returned {len(cc_emails)} items")
+    print(f"🔍 DEBUG API: First item: {cc_emails[0] if cc_emails else 'NONE'}")
+    
+    safe_data = []
+
+    
+    for cc in cc_emails:
+        safe_data.append({
+            "_id": str(cc.get("_id")),
+            "email": cc.get("email"),
+            "created_at": str(cc.get("created_at")) if cc.get("created_at") else None
+        })
+    
+    return jsonify({'cc_emails': safe_data})
+
+
+@admin_bp.route('/api/admin/cc-emails', methods=['POST'])
+@require_admin
+def add_cc_email():
+    """Add CC email"""
+    data = request.json
+    email = data.get('email', '').strip()
+    if not email or '@' not in email:
+        return jsonify({'error': 'Valid email required'}), 400
+    
+    from models import CcEmail
+    cc = CcEmail.create(email)
+    if cc:
+        cc['_id'] = str(cc['_id'])
+        if 'created_at' in cc and cc['created_at']:
+            cc['created_at'] = cc['created_at'].isoformat() if hasattr(cc['created_at'], 'isoformat') else str(cc['created_at'])
+        return jsonify({'success': True, 'cc_email': cc})
+    return jsonify({'error': 'Failed to add'}), 500
+
+
+@admin_bp.route('/api/admin/cc-emails/<cc_id>', methods=['DELETE'])
+@require_admin
+def delete_cc_email(cc_id):
+    """Delete CC email"""
+    from models import CcEmail
+    if CcEmail.delete(cc_id):
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to delete'}), 400
+
+
+@admin_bp.route('/admin/cc')
+@require_admin
+def cc_management():
+    """CC Emails and Logo management page"""
+    return render_template('admin/cc.html', username=session['username'])
+
+
+# @admin_bp.route('/api/admin/logo', methods=['GET'])
+# @require_admin
+# def get_logo_status():
+#     """Get current logo status"""
+#     import os
+#     logo_path = 'backend/uploads/logo/company_logo.jpeg'
+#     logo_exists = os.path.exists(logo_path)
+#     return jsonify({
+#         'logo_exists': logo_exists,
+#         'logo_path': logo_path
+#     })
+
+
+@admin_bp.route('/api/admin/logo-upload', methods=['POST'])
+@require_admin
+def upload_logo():
+    """Upload company logo for email signature"""
+    if 'logo' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    
+    file = request.files['logo']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    from werkzeug.utils import secure_filename
+    filename = secure_filename(file.filename)
+    if not filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+        return jsonify({'error': 'Only PNG/JPG allowed'}), 400
+    
+    logo_dir = 'backend/uploads/logo'
+    os.makedirs(logo_dir, exist_ok=True)
+    logo_path = os.path.join(logo_dir, 'company_logo.jpeg')
+    
+    file.save(logo_path)
+    return jsonify({'success': True, 'message': 'Logo uploaded successfully'})
+
 
 @admin_bp.route('/api/admin/stats')
 @require_admin
@@ -443,3 +573,5 @@ def get_stats():
         'emails_sent': stats['sent'],
         'emails_failed': stats['failed']
     })
+
+

@@ -66,6 +66,8 @@ class Collections:
     REQUIREMENTS = 'requirements'
     TEMPLATES = 'templates'
     EMAIL_LOGS = 'email_logs'
+    CC_EMAILS = 'cc_emails' # FEATURE 3
+    CC_EMAILS = 'cc_emails'  # FEATURE 3: Global CC emails collection
 
 
 # Initialize database with default data

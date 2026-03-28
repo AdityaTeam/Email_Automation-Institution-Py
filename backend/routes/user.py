@@ -292,12 +292,32 @@ def get_requirements():
     return jsonify({'requirements': requirements})
 
 
+@user_bp.route('/api/cc-emails', methods=['GET'])
+@require_login
+def get_cc_emails():
+    from models import CcEmail
+    
+    cc_emails = CcEmail.get_all()
+    
+    safe_cc = []
+    for cc in cc_emails:
+        safe_cc.append({
+            '_id': str(cc['_id']),
+            'email': cc.get('email'),
+            'created_at': str(cc.get('created_at')) if cc.get('created_at') else None
+        })
+    
+    return jsonify({'cc_emails': safe_cc})
+
+
 @user_bp.route('/api/send', methods=['POST'])
 @require_login
 def send_emails():
     """Send bulk emails with automatic sender rotation"""
+
     data = request.json
     recipients = data.get('recipients', [])
+    cc_emails = data.get('cc_emails', [])  # NEW: CC emails from frontend
     sender_email_id = data.get('sender_email_id', '')
     from_name = data.get('from_name', session['username'])
     subject = data.get('subject', '')
@@ -307,8 +327,11 @@ def send_emails():
     is_html = data.get('is_html', False)
     signature_data = data.get('signature_data', {})
     
+    print(f"📧 CC Emails: {cc_emails}")  # Debug CC
+    
     # debug start
     print("send_emails called. template_id=", template_id)
+
     # Fetch template attachments if template_id provided
     if template_id:
         template = Template.get_by_id(template_id)
@@ -362,9 +385,11 @@ def send_emails():
             break
     
     if not is_html:
-        body = Template.process_body(body)
-        signature = Template.process_body(signature)
-        is_html = True
+        # Keep as plain text - no HTML processing
+        pass
+        # body = Template.process_body(body)
+        # signature = Template.process_body(signature)
+        # is_html = True
     
     personalized_recipients = []
     for r in recipients:
@@ -380,60 +405,27 @@ def send_emails():
     
     try:
         BATCH_SIZE = 25
-        sender = EmailSender(email_accounts, batch_size=BATCH_SIZE)
-        
-        # Set the current account index to start from selected sender
+        sender = EmailSender(email_accounts, batch_size=15)
         sender.current_account_index = start_index
         
-        sent_count = 0
-        failed_list = []
+        result = sender.send_bulk_emails(
+            personalized_recipients,
+            subject,
+            "",
+            from_name,
+            cc_emails=cc_emails,
+            attachments=attachments,
+            delay_between_emails=5
+        )
         
-        for r in personalized_recipients:
-            # CRITICAL: Check rotation BEFORE every send (DB-driven)
-            if sender.needs_rotation():
-                available = sender.find_next_available_account()
-                if not available:
-                    # All accounts exhausted → RESET
-                    print("🔄 ALL ACCOUNTS EXHAUSTED - RESETTING COUNTS!")
-                    
-                    EmailID.reset_counts(session['user_id'])
-                    
-                    # Reset ALL local account counts to sync with DB
-                    for acc in email_accounts:
-                        acc['emails_sent'] = 0
-                    
-                    # Reset EmailSender state
-                    sender.current_account_index = 0
-            
-            current_acc = sender.get_current_account()
-            if not current_acc:
-                failed_list.append({'email': r['email'], 'error': 'No available sender'})
-                continue
-            
-            print(f"📧 Using {current_acc['email']} ({sender.get_account_sent_count()}/25)")
-            
-            success = sender.send_single_email(
-                to_email=r['email'],
-                subject=subject,
-                body=r['body'],
-                from_name=from_name,
-                attachments=attachments,
-                is_html=is_html
-            )
-            
-            if success:
-                # SINGLE increment after successful send (DB + local sync)
-                sender.increment_current_account()
-                EmailID.increment_sent_count(current_acc['_id'])
-                
-                EmailLog.create(session['user_id'], current_acc['_id'], r['email'], subject, 'sent')
-                sent_count += 1
-                print(f"✅ Sent #{sent_count} via {current_acc['email']}")
-            else:
-                error_msg = sender.failed[-1]['error'] if sender.failed else 'Unknown'
-                EmailLog.create(session['user_id'], sender_email_id, r['email'], subject, 'failed', error_msg)
-                failed_list.append({'email': r['email'], 'error': error_msg})
-                print(f"❌ Failed: {error_msg}")
+        sent_count = result["total_sent"]
+        failed_list = result.get("failed", [])
+        
+        # Log results
+        for log_entry in sender.failed:
+            EmailLog.create(session['user_id'], sender_email_id, log_entry['email'], subject, 'failed', log_entry['error'])
+        for i in range(sent_count):
+            EmailLog.create(session['user_id'], sender_email_id, personalized_recipients[i]['email'], subject, 'sent')
         
         return jsonify({'success': True, 'sent': sent_count, 'failed': len(failed_list), 'failed_list': failed_list})
     except Exception as e:
@@ -457,13 +449,24 @@ def logs():
 @user_bp.route('/api/logs', methods=['GET'])
 @require_login
 def get_logs():
-    """Get email logs"""
-    logs = EmailLog.get_by_user(session['user_id'])
+    """Get paginated email logs (FEATURE 2)"""
+    page = int(request.args.get('page', 1))
+    limit = int(request.args.get('limit', 100))
+    logs = EmailLog.get_by_user_paginated(session['user_id'], page, limit)
+    total_count = EmailLog.get_count(session['user_id'])
+    
     email_ids = {str(eid['_id']): eid['email'] for eid in EmailID.get_by_user(session['user_id'])}
     for log in logs:
         log['_id'] = str(log['_id'])
         log['user_id'] = str(log['user_id'])
         log['sender_email_id'] = str(log['sender_email_id'])
         log['sender_email'] = email_ids.get(str(log['sender_email_id']), 'Unknown')
-    return jsonify({'logs': logs})
+    
+    return jsonify({
+        'logs': logs,
+        'total': total_count,
+        'page': page,
+        'limit': limit,
+        'total_pages': (total_count + limit - 1) // limit if total_count > 0 else 1
+    })
 
