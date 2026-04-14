@@ -405,7 +405,7 @@ def send_emails():
     
     try:
         BATCH_SIZE = 25
-        sender = EmailSender(email_accounts, batch_size=15)
+        sender = EmailSender(email_accounts, batch_size=BATCH_SIZE, user_id=session['user_id'])
         sender.current_account_index = start_index
         
         result = sender.send_bulk_emails(
@@ -418,16 +418,53 @@ def send_emails():
             delay_between_emails=5
         )
         
-        sent_count = result["total_sent"]
+        sent_entries = result.get("sent_entries", [])
         failed_list = result.get("failed", [])
+        sent_count = len(sent_entries)
         
-        # Log results
-        for log_entry in sender.failed:
-            EmailLog.create(session['user_id'], sender_email_id, log_entry['email'], subject, 'failed', log_entry['error'])
-        for i in range(sent_count):
-            EmailLog.create(session['user_id'], sender_email_id, personalized_recipients[i]['email'], subject, 'sent')
-        
-        return jsonify({'success': True, 'sent': sent_count, 'failed': len(failed_list), 'failed_list': failed_list})
+        # Log results with actual sender account used for each recipient.
+        for sent_entry in sent_entries:
+            log_sender_id = sent_entry.get('sender_email_id') or sender_email_id
+            EmailLog.create(session['user_id'], log_sender_id, sent_entry['email'], subject, 'sent')
+
+        for fail_entry in failed_list:
+            log_sender_id = fail_entry.get('sender_email_id') or sender_email_id
+            EmailLog.create(
+                session['user_id'],
+                log_sender_id,
+                fail_entry.get('email', ''),
+                subject,
+                'failed',
+                fail_entry.get('error', 'Send failed')
+            )
+
+        # Return updated values so frontend can sync compose UI immediately.
+        stats = EmailLog.get_stats(session['user_id'])
+        refreshed_email_ids = EmailID.get_by_user(session['user_id'])
+        email_usage = []
+        for eid in refreshed_email_ids:
+            email_usage.append({
+                '_id': str(eid['_id']),
+                'email': eid.get('email', ''),
+                'emails_sent': eid.get('emails_sent', 0)
+            })
+
+        recent_logs = EmailLog.get_by_user(session['user_id'], limit=10)
+        for log in recent_logs:
+            log['_id'] = str(log['_id'])
+            log['user_id'] = str(log['user_id'])
+            log['sender_email_id'] = str(log['sender_email_id'])
+            log['sent_at'] = log['sent_at'].isoformat() if log.get('sent_at') else None
+
+        return jsonify({
+            'success': True,
+            'sent': sent_count,
+            'failed': len(failed_list),
+            'failed_list': failed_list,
+            'dashboard_stats': stats,
+            'email_usage': email_usage,
+            'recent_logs': recent_logs
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

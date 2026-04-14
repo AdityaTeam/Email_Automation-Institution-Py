@@ -16,15 +16,17 @@ import time
 class EmailSender:
     """Email sender with SMTP pooling & Gmail-safe rotation"""
     
-    def __init__(self, email_accounts, batch_size=15):
+    def __init__(self, email_accounts, batch_size=25, user_id=None):
         """
-        Initialize with Gmail-safe batch_size=15
+        Initialize with configurable batch_size (default 25 emails per account)
         """
         self.email_accounts = email_accounts
         self.batch_size = batch_size
+        self.user_id = user_id
         self.current_account_index = 0
         self.total_sent = 0
         self.failed = []
+        self.sent_entries = []
         self.server = None  # SMTP Connection Pooling
         self.current_account = None
         self.last_rotation = 0
@@ -48,12 +50,19 @@ class EmailSender:
         if current:
             current['emails_sent'] = current.get('emails_sent', 0) + 1
             self.total_sent += 1
-            print(f"📊 {current['email']}: {current['emails_sent']}/25")
+            account_id = current.get('_id')
+            if account_id:
+                try:
+                    from models import EmailID
+                    EmailID.increment_sent_count(account_id)
+                except Exception as db_error:
+                    print(f"Failed to persist sent count for {current['email']}: {db_error}")
+            print(f"📊 {current['email']}: {current['emails_sent']}/{self.batch_size}")
     
     def needs_rotation(self):
         "\"\"Check if current account needs rotation (DB-driven)\"\"\""
         count = self.get_account_sent_count()
-        print(f"🔍 {self.get_current_account()['email']}: {count}/25")
+        print(f"🔍 {self.get_current_account()['email']}: {count}/{self.batch_size}")
         if count >= self.batch_size:
             print(f"🚫 LIMIT REACHED for {self.get_current_account()['email']}")
             return True
@@ -68,7 +77,7 @@ class EmailSender:
             self.current_account_index = (start_index + i) % total_accounts
             if not self.needs_rotation():
                 current = self.get_current_account()
-                print(f"✅ Selected: {current['email']} ({self.get_account_sent_count()}/25)")
+                print(f"✅ Selected: {current['email']} ({self.get_account_sent_count()}/{self.batch_size})")
                 return True
         
         # All accounts exhausted
@@ -301,13 +310,16 @@ class EmailSender:
                 if not self.find_next_available_account():
                     print("🔄 All accounts exhausted. Resetting...")
 
-                    # 🔥 Reset all counts (DB should also reset outside)
+                    # Reset counters in DB and local cache, but keep total_sent for this run.
+                    if self.user_id:
+                        try:
+                            from models import EmailID
+                            EmailID.reset_counts(self.user_id)
+                        except Exception as db_error:
+                            print(f"Failed to reset DB counters: {db_error}")
+
                     for acc in self.email_accounts:
                         acc['emails_sent'] = 0
-
-                    self.reset_counters()   
-
-                    # Try again after reset
                     self.current_account_index = 0
             
             # Send the email
@@ -326,8 +338,19 @@ class EmailSender:
                 print(f"✅ Sent (Account: {self.get_current_account()['email']})")
                 # 🔥 CRITICAL FIX
                 self.increment_current_account()
+                current = self.get_current_account()
+                self.sent_entries.append({
+                    'email': to_email,
+                    'sender_email_id': current.get('_id') if current else None
+                })
             else:
                 print(f"❌ Failed")
+                current = self.get_current_account()
+                self.failed.append({
+                    'email': to_email,
+                    'error': 'Send failed',
+                    'sender_email_id': current.get('_id') if current else None
+                })
             
             # Add delay between emails (except for the last one)
             if index < total_recipients:
@@ -338,6 +361,7 @@ class EmailSender:
         
         return {
             "total_sent": self.total_sent,
+            "sent_entries": self.sent_entries,
             "failed": self.failed,
             "total_recipients": total_recipients
         }
