@@ -317,7 +317,7 @@ def send_emails():
 
     data = request.json
     recipients = data.get('recipients', [])
-    cc_emails = data.get('cc_emails', [])  # NEW: CC emails from frontend
+    cc_emails = data.get('cc_emails', [])
     sender_email_id = data.get('sender_email_id', '')
     from_name = data.get('from_name', session['username'])
     subject = data.get('subject', '')
@@ -325,7 +325,12 @@ def send_emails():
     template_id = data.get('template_id')
     attachments = []
     is_html = data.get('is_html', False)
+    separate_threads = data.get('separate_threads', True)
     signature_data = data.get('signature_data', {})
+
+    if not isinstance(cc_emails, list):
+        cc_emails = []
+    cc_emails = [cc.strip() for cc in cc_emails if isinstance(cc, str) and cc.strip()]
     
     print(f"📧 CC Emails: {cc_emails}")  # Debug CC
     
@@ -384,12 +389,9 @@ def send_emails():
             start_index = i
             break
     
-    if not is_html:
-        # Keep as plain text - no HTML processing
-        pass
-        # body = Template.process_body(body)
-        # signature = Template.process_body(signature)
-        # is_html = True
+    if is_html:
+        body = Template.process_body(body)
+        signature = Template.process_body(signature)
     
     personalized_recipients = []
     for r in recipients:
@@ -415,7 +417,9 @@ def send_emails():
             from_name,
             cc_emails=cc_emails,
             attachments=attachments,
-            delay_between_emails=5
+            is_html=is_html,
+            delay_between_emails=5,
+            separate_threads=separate_threads
         )
         
         sent_entries = result.get("sent_entries", [])

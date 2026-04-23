@@ -11,6 +11,8 @@ from datetime import datetime
 import os 
 from email.mime.image import MIMEImage
 import time
+from email.utils import formatdate
+import re
 
 
 class EmailSender:
@@ -93,25 +95,50 @@ class EmailSender:
 
         
 
-    def create_email_message(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=[]):
-        """Create email message (PLAIN TEXT + LOGO ATTACHMENT)"""
+    def _html_to_plain_text(self, html):
+        """Create readable plain-text fallback from HTML body."""
+        if not html:
+            return ""
+        text = re.sub(r'(?is)<(script|style).*?>.*?</\1>', '', html)
+        text = re.sub(r'(?i)<br\s*/?>', '\n', text)
+        text = re.sub(r'(?i)</(p|div|li|h1|h2|h3|h4|h5|h6)>', '\n', text)
+        text = re.sub(r'(?is)<[^>]+>', '', text)
+        text = text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
+
+    def create_email_message(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False):
+        """Create MIME-safe email with plain or HTML body + optional attachments."""
 
         account = self.get_current_account()
         if not account:
             return None
 
-        msg = MIMEMultipart()
+        if attachments is None:
+            attachments = []
+
+        msg = MIMEMultipart('mixed')
         msg['From'] = f"{from_name} <{account['email']}>"
         msg['To'] = to_email
 
+        sanitized_cc = []
         if cc_emails:
-            msg['Cc'] = ", ".join(cc_emails)
+            sanitized_cc = [cc.strip() for cc in cc_emails if isinstance(cc, str) and cc.strip()]
+            if sanitized_cc:
+                msg['Cc'] = ", ".join(sanitized_cc)
 
         msg['Subject'] = subject
-        msg['Date'] = datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z')
+        msg['Date'] = formatdate(localtime=True)
 
-        # ✅ Plain text only
-        msg.attach(MIMEText(body, 'plain'))
+        body = body or ""
+        if is_html:
+            alternative_part = MIMEMultipart('alternative')
+            plain_fallback = self._html_to_plain_text(body)
+            alternative_part.attach(MIMEText(plain_fallback or body, 'plain', 'utf-8'))
+            alternative_part.attach(MIMEText(body, 'html', 'utf-8'))
+            msg.attach(alternative_part)
+        else:
+            msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
         # ✅ Attach LOGO from folder
         logo_path = os.path.join(os.getcwd(), "backend", "uploads", "logo", "company_logo.jpeg")
@@ -215,7 +242,7 @@ class EmailSender:
             self.server = None
             return False
     
-    def send_single_email(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=[]):
+    def send_single_email(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False):
         """Send using pooled connection + validation"""
         import socket
         
@@ -228,13 +255,21 @@ class EmailSender:
         
         try:
             # Message prep
-            msg = self.create_email_message(to_email, subject, body, from_name, cc_emails, attachments)
+            msg = self.create_email_message(
+                to_email,
+                subject,
+                body,
+                from_name,
+                cc_emails,
+                attachments,
+                is_html
+            )
             if not msg:
                 return False
             
             recipients = [to_email]
             if cc_emails:
-                recipients.extend(cc_emails)
+                recipients.extend([cc.strip() for cc in cc_emails if isinstance(cc, str) and cc.strip()])
             
             print(f"📤 Pool send → {to_email}")
             
@@ -271,7 +306,7 @@ class EmailSender:
             socket.setdefaulttimeout(None)
 
     
-    def send_bulk_emails(self, recipients, subject, body, from_name="Sender", cc_emails=None, attachments=[], is_html=False, delay_between_emails=1):
+    def send_bulk_emails(self, recipients, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False, delay_between_emails=1, separate_threads=False):
         """
         Send emails to multiple recipients with rotation
         
@@ -285,6 +320,9 @@ class EmailSender:
             delay_between_emails: Delay in seconds between emails
         """
         import time
+
+        if attachments is None:
+            attachments = []
         
         total_recipients = len(recipients)
         print(f"\n📧 Starting bulk email send...")
@@ -304,6 +342,11 @@ class EmailSender:
             else:
                 to_email = recipient
                 personalized_body = body
+
+            email_subject = subject
+            if separate_threads:
+                thread_token = datetime.utcnow().strftime('%Y%m%d%H%M%S') + f"-{index:04d}"
+                email_subject = f"{subject} | Ref:{thread_token}"
             
             # CRITICAL: Check rotation BEFORE every send (DB-driven)
             if self.needs_rotation():
@@ -327,11 +370,12 @@ class EmailSender:
             
             success = self.send_single_email(
                 to_email,
-                subject,
+                email_subject,
                 personalized_body,
                 from_name,
-                cc_emails=cc_emails,      # ✅ correct
-                attachments=attachments   # ✅ correct
+                cc_emails=cc_emails,
+                attachments=attachments,
+                is_html=is_html
             )
             
             if success:
