@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="stylesheet"
+href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Repository Categories</title>
+
+<style>
+/* =========================
+   GLOBAL
+========================= */
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:'Segoe UI',sans-serif;
+    background:#f4f7fb;
+    color:#333;
+}
+
+/* =========================
+   APP LAYOUT
+========================= */
+
+.app-layout{
+    display:flex;
+    min-height:100vh;
+}
+
+/* =========================
+   MAIN CONTENT
+========================= */
+
+.main-content{
+    flex:1;
+    padding:30px;
+    overflow-x:auto;
+}
+
+.page-title{
+    font-size:32px;
+    font-weight:700;
+    color:#1f2937;
+    margin-bottom:25px;
+}
+
+/* =========================
+   HEADER
+========================= */
+
+.category-header{
+    margin-bottom:25px;
+}
+
+.category-title{
+    font-size:24px;
+    font-weight:700;
+    color:#111827;
+}
+
+/* =========================
+   GRID
+========================= */
+
+.category-grid{
+    display:grid;
+    grid-template-columns:
+    repeat(auto-fit,minmax(260px,1fr));
+    gap:25px;
+}
+
+/* =========================
+   CARD
+========================= */
+
+.category-card{
+    background:#fff;
+    border-radius:18px;
+    padding:25px;
+    cursor:pointer;
+    position:relative;
+    transition:.3s;
+    box-shadow:
+    0 4px 15px rgba(0,0,0,.08);
+}
+
+.category-card:hover{
+    transform:translateY(-6px);
+    box-shadow:
+    0 10px 25px rgba(0,0,0,.15);
+}
+
+.category-icon{
+    width:70px;
+    height:70px;
+    border-radius:16px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:34px;
+    background:#eef4ff;
+    margin-bottom:18px;
+}
+
+.category-name{
+    font-size:20px;
+    font-weight:700;
+    margin-bottom:8px;
+}
+
+.category-desc{
+    color:#6b7280;
+    font-size:14px;
+    line-height:1.5;
+    margin-bottom:15px;
+}
+
+.category-count{
+    font-size:13px;
+    font-weight:600;
+    color:#4b5563;
+}
+
+.badge{
+    position:absolute;
+    top:18px;
+    right:18px;
+    background:#dcfce7;
+    color:#166534;
+    padding:6px 12px;
+    border-radius:30px;
+    font-size:12px;
+    font-weight:700;
+}
+
+/* =========================
+   EMPTY STATE
+========================= */
+
+.empty-state{
+    text-align:center;
+    padding:60px;
+    color:#6b7280;
+    font-size:18px;
+}
+
+/* =========================
+   SIDEBAR SUPPORT
+   (admin_sidebar.html)
+========================= */
+
+.sidebar{
+    width:260px;
+    min-width:260px;
+    min-height:100vh;
+    background:#ffffff;
+    box-shadow:2px 0 12px rgba(0,0,0,0.08);
+    flex-shrink:0;
+}
+
+.sidebar-user{
+    padding:20px;
+    border-bottom:1px solid #e5e7eb;
+    margin-bottom:15px;
+}
+
+.sidebar-user i{
+    color:#ef4444;
+    margin-right:8px;
+}
+
+.admin-badge{
+    background:#ef4444;
+    color:white;
+    padding:4px 12px;
+    border-radius:10px;
+    font-size:13px;
+    font-weight:600;
+    margin-left:10px;
+}
+
+.sidebar .nav-link{
+    display:flex;
+    align-items:center;
+    gap:15px;
+    color:#1f2937;
+    padding:16px 18px;
+    margin:10px 12px;
+    border-radius:14px;
+    text-decoration:none;
+    font-size:16px;
+    transition:.3s;
+}
+
+.sidebar .nav-link:hover{
+    background:#4a90d9;
+    color:white;
+}
+
+.sidebar .nav-link.active{
+    background:#4a90d9;
+    color:white;
+}
+
+.sidebar .nav-link i{
+    width:24px;
+    text-align:center;
+    font-size:18px;
+}
+
+/* =========================
+   RESPONSIVE
+========================= */
+
+@media(max-width:768px){
+
+    .app-layout{
+        flex-direction:column;
+    }
+
+    .sidebar{
+        width:100%;
+        min-height:auto;
+    }
+
+    .main-content{
+        padding:15px;
+    }
+
+    .page-title{
+        font-size:26px;
+    }
+
+    .category-grid{
+        grid-template-columns:1fr;
+    }
+}
+</style>
+
+</head>
+ 
+<body>
+  <div class="app-layout">
+
+    {% include 'includes/admin_sidebar.html' %}
+
+<main class="main-content">
+
+    <h1 class="page-title">
+        📂 Repository Categories
+    </h1>
+
+    <div class="category-header">
+
+        <div class="category-title">
+            AI Classified Categories
+        </div>
+
+    </div>
+
+    <div class="category-grid" id="categoryGrid">
+
+        <div class="empty-state">
+            Loading Categories...
+        </div>
+
+    </div>
+
+</main>
+
+<script>
+
+document.addEventListener("DOMContentLoaded", function () {
+
+    loadCategories();
+
+});
+
+const emojiMap = {
+
+    "Industry": "🏭",
+    "Doctor": "🩺",
+    "Play School": "🎒",
+    "General": "📁"
+
+};
+
+
+/* ==========================================
+   LOAD CATEGORIES
+========================================== */
+
+async function loadCategories() {
+
+    try {
+
+        const response =
+        await fetch(
+            "/admin/categories-api"
+        );
+
+        if (!response.ok) {
+
+            throw new Error(
+                "Failed to fetch categories"
+            );
+
+        }
+
+        const categories =
+        await response.json();
+
+        const container =
+        document.querySelector(
+            ".category-grid"
+        );
+
+        container.innerHTML = "";
+
+        if (
+            !categories ||
+            categories.length === 0
+        ) {
+
+            container.innerHTML = `
+
+                <div class="empty-state">
+
+                    <h3>
+                        No Categories Found
+                    </h3>
+
+                </div>
+
+            `;
+
+            return;
+
+        }
+
+        categories.forEach(category => {
+
+            const emoji =
+            emojiMap[
+                category.category
+            ] || "📁";
+
+            const filesCount =
+            category.files_count || 0;
+
+            container.innerHTML += `
+
+            <div
+                class="category-card"
+                onclick="openCategory('${category.category}')">
+
+                <div class="badge">
+                    ${filesCount} Files
+                </div>
+
+                <div class="category-icon">
+                    ${emoji}
+                </div>
+
+                <div class="category-name">
+                    ${category.category}
+                </div>
+
+                <div class="category-desc">
+                    Browse all files under
+                    ${category.category}
+                </div>
+
+                <div class="category-count">
+                    ${filesCount} Files Available
+                </div>
+
+            </div>
+
+            `;
+
+        });
+
+    }
+
+    catch(error) {
+
+        console.error(
+            "Category Load Error:",
+            error
+        );
+
+        document.querySelector(
+            ".category-grid"
+        ).innerHTML = `
+
+            <div class="empty-state">
+
+                <h3>
+                    Failed to load categories
+                </h3>
+
+                <p>
+                    Check /admin/categories-api route
+                </p>
+
+            </div>
+
+        `;
+
+    }
+
+}
+
+
+/* ==========================================
+   OPEN CATEGORY
+========================================== */
+
+function openCategory(category) {
+
+    window.location.href =
+        "/admin/category-page/" +
+        encodeURIComponent(category);
+
+}
+
+</script>
+</div>
+</body>
+</html>
