@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -50,6 +51,9 @@
                     <a class="nav-link" href="/dashboard"><i class="fas fa-home"></i> Dashboard</a>
                     <a class="nav-link" href="/email-ids"><i class="fas fa-envelope"></i> Email IDs</a>
                     <a class="nav-link" href="/uploads"><i class="fas fa-upload"></i> Uploads</a>
+                    <a class="nav-link" href="/data-repository">
+                      <i class="fas fa-folder-open"></i> Data Repository
+                    </a>
                     <a class="nav-link active" href="/compose"><i class="fas fa-pen"></i> Compose</a>
                     <a class="nav-link" href="/logs"><i class="fas fa-history"></i> Logs</a>
                     <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -227,20 +231,113 @@ Best Regards,
                             </div>
                         </div>
                         
-                        <div class="card">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <span><i class="fas fa-users"></i> Recipients</span>
-                                <span class="badge bg-primary" id="recipientCount">0</span>
-                            </div>
-                            <div class="card-body recipient-table" id="recipientTableContainer">
-                                <p class="text-muted text-center py-4" id="noRecipients"><i class="fas fa-inbox fa-2x"></i><br>Select a file to see recipients</p>
-                                <table class="table table-striped" id="recipientTable" style="display: none;">
-                                    <thead><tr><th>#</th><th>Email</th><th>Name</th><th>Institute</th></tr></thead>
-                                    <tbody id="recipientTableBody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                        
+                   <div class="card">
+<div class="card">
+
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>
+            <i class="fas fa-users"></i>
+            Email Validation Results
+        </span>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-success"
+                id="exportValidBtn">
+                <i class="fas fa-file-export me-1"></i>
+                Export Valid
+            </button>
+
+            <button class="btn btn-sm btn-outline-danger"
+                id="exportInvalidBtn">
+                <i class="fas fa-file-export me-1"></i>
+                Export Invalid
+            </button>
+        </div>
+    </div>
+
+    <div class="card-body">
+
+        <!-- STATS -->
+        <div class="row g-3 mb-4">
+
+            <div class="col-3">
+                <div class="border rounded p-3 text-center bg-light">
+                    <h4 id="totalEmails">0</h4>
+                    <small>Total Emails</small>
+                </div>
+            </div>
+
+            <div class="col-3">
+                <div class="border rounded p-3 text-center bg-success text-white">
+                    <h4 id="validEmails">0</h4>
+                    <small>Valid Emails</small>
+                </div>
+            </div>
+
+            <div class="col-3">
+                <div class="border rounded p-3 text-center bg-danger text-white">
+                    <h4 id="invalidEmails">0</h4>
+                    <small>Invalid Emails</small>
+                </div>
+            </div>
+
+            <div class="col-3">
+                <div class="border rounded p-3 text-center bg-primary text-white">
+                    <h4 id="validationRate">0%</h4>
+                    <small>Validation Rate</small>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- SEARCH -->
+        <div class="mb-3">
+            <input type="text"
+                class="form-control"
+                id="emailSearch"
+                placeholder="Search email...">
+        </div>
+
+        <!-- PROGRESS -->
+        <div class="mb-3">
+            <label class="form-label small">
+                Validation Progress
+            </label>
+
+            <div class="progress" style="height:20px;">
+                <div class="progress-bar bg-success"
+                    id="validationProgress"
+                    style="width:0%">
+                    0%
+                </div>
+            </div>
+        </div>
+
+        <!-- TABLE -->
+        <div style="max-height:500px; overflow-y:auto;">
+
+            <table class="table table-hover align-middle">
+
+                <thead class="table-light sticky-top">
+                    <tr>
+                        <th>#</th>
+                        <th>Email</th>
+                        <th>Name</th>
+                        <th>Institute</th>
+                        <th>Status</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+
+                <tbody id="recipientTableBody"></tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+</div>
                         <div class="card" id="progressCard" style="display: none;">
                             <div class="card-header"><i class="fas fa-chart-line"></i> Sending Progress</div>
                             <div class="card-body">
@@ -354,60 +451,143 @@ ${companyWebsite}`;
             } catch (error) { console.error('Error loading file:', error); showAlert('danger', 'Error loading file'); }
         });
         
-        function updateRecipientDisplay() {
-            const countEl = document.getElementById('recipientCount');
-            const noRecipientsEl = document.getElementById('noRecipients');
-            const tableEl = document.getElementById('recipientTable');
-            const tbodyEl = document.getElementById('recipientTableBody');
-            
-            countEl.textContent = recipients.length;
-            if (recipients.length === 0) { noRecipientsEl.style.display = 'block'; tableEl.style.display = 'none'; return; }
-            
-            noRecipientsEl.style.display = 'none';
-            tableEl.style.display = 'table';
-            tbodyEl.innerHTML = '';
-            
-            recipients.slice(0, 100).forEach((r, index) => {
-                const row = document.createElement('tr');
-                row.innerHTML = `<td>${index + 1}</td><td>${r.email}</td><td>${r.name || '-'}</td><td>${r.institute || '-'}</td>`;
-                tbodyEl.appendChild(row);
-            });
-            
-            if (recipients.length > 100) {
-                const moreRow = document.createElement('tr');
-                moreRow.innerHTML = `<td colspan="4" class="text-muted">...and ${recipients.length - 100} more</td>`;
-                tbodyEl.appendChild(moreRow);
-            }
+function updateRecipientDisplay() {
+
+    const tableBody = document.getElementById('recipientTableBody');
+
+    tableBody.innerHTML = '';
+
+    let validCount = 0;
+    let invalidCount = 0;
+
+    recipients.forEach((r, index) => {
+
+        const isValid = r.status === 'VALID';
+
+        if (isValid) {
+            validCount++;
+        } else {
+            invalidCount++;
         }
 
-        function setSendingState(isSending) {
-            const overlay = document.getElementById('loadingOverlay');
-            const controls = document.querySelectorAll('button, input, select, textarea');
-            const navLinks = document.querySelectorAll('.sidebar .nav-link');
+        tableBody.innerHTML += `
+            <tr>
+                <td>${index + 1}</td>
 
-            overlay.classList.toggle('active', isSending);
-            document.body.style.overflow = isSending ? 'hidden' : '';
+                <td>${r.email || '-'}</td>
 
-            controls.forEach(el => {
-                if (isSending) {
-                    el.dataset.wasDisabled = el.disabled ? '1' : '0';
-                    el.disabled = true;
-                } else {
-                    el.disabled = el.dataset.wasDisabled === '1';
-                    delete el.dataset.wasDisabled;
-                }
-            });
+                <td>${r.name || '-'}</td>
 
-            navLinks.forEach(link => {
-                if (isSending) {
-                    link.style.pointerEvents = 'none';
-                    link.style.opacity = '0.6';
-                } else {
-                    link.style.pointerEvents = '';
-                    link.style.opacity = '';
-                }
-            });
-        }
+                <td>${r.institute || '-'}</td>
+
+                <td>
+                    <span class="badge ${
+                        isValid
+                            ? 'bg-success'
+                            : 'bg-danger'
+                    }">
+                        ${r.status || 'INVALID'}
+                    </span>
+                </td>
+
+                <td>
+                    ${
+                        isValid
+                            ? '-'
+                            : `<span class="text-danger">
+                                ${r.reason || 'Invalid'}
+                              </span>`
+                    }
+                </td>
+            </tr>
+        `;
+    });
+
+    const total = recipients.length;
+
+    document.getElementById('totalEmails').innerText = total;
+
+    document.getElementById('validEmails').innerText = validCount;
+
+    document.getElementById('invalidEmails').innerText = invalidCount;
+
+    let percentage = 0;
+
+    if (total > 0) {
+        percentage = Math.round((validCount / total) * 100);
+    }
+
+    document.getElementById('validationRate').innerText =
+        percentage + '%';
+
+    document.getElementById('validationProgress').style.width =
+        percentage + '%';
+
+    document.getElementById('validationProgress').innerText =
+        percentage + '%';
+}
+
+// Export Emails Feature
+function exportEmails(type) {
+
+    let data = [];
+    let filename = '';
+
+    if (type === 'valid') {
+
+        data = recipients.filter(r => r.status === 'VALID');
+
+        filename = 'valid_emails.csv';
+
+    } else {
+
+        data = recipients.filter(r => r.status !== 'VALID');
+
+        filename = 'invalid_emails.csv';
+    }
+
+    if (data.length === 0) {
+
+        showAlert('warning', `No ${type} emails to export`);
+
+        return;
+    }
+
+    let csv = 'Email,Status,Reason\n';
+
+    data.forEach(r => {
+
+        csv += `"${r.email}","${r.status}","${r.reason || ''}"\n`;
+
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+
+    const url = window.URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+
+    a.href = url;
+
+    a.download = filename;
+
+    document.body.appendChild(a);
+
+    a.click();
+
+    document.body.removeChild(a);
+
+    window.URL.revokeObjectURL(url);
+}
+
+document.getElementById('exportInvalidBtn')
+    .addEventListener('click', () => {
+        exportEmails('invalid');
+    });
+    document.getElementById('exportValidBtn')
+    .addEventListener('click', () => {
+        exportEmails('valid');
+    });
 
         function renderEmailUsage(emailUsage, selectedSenderId) {
             if (!Array.isArray(emailUsage)) return;
@@ -634,14 +814,57 @@ ${companyWebsite}`;
             populateCcDropdown();
         });
 
-        function showAlert(type, message) {
-            const alertDiv = document.createElement('div');
-            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
-            alertDiv.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
-            document.getElementById('alertContainer').appendChild(alertDiv);
-            setTimeout(() => alertDiv.remove(), 5000);
-        }
-    </script>
+     function showAlert(type, message) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+    alertDiv.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+    document.getElementById('alertContainer').appendChild(alertDiv);
+    setTimeout(() => alertDiv.remove(), 5000);
+}
+
+/* PASTE HERE */
+
+function setSendingState(isSending) {
+
+    const overlay = document.getElementById('loadingOverlay');
+
+    const sendBtn = document.getElementById('sendBtn');
+
+    if (isSending) {
+
+        overlay.classList.add('active');
+
+        sendBtn.disabled = true;
+
+    } else {
+
+        overlay.classList.remove('active');
+
+        sendBtn.disabled = false;
+    }
+}
+
+document.getElementById('emailSearch')
+    .addEventListener('input', function () {
+
+        const value = this.value.toLowerCase();
+
+        const rows = document.querySelectorAll(
+            '#recipientTableBody tr'
+        );
+
+        rows.forEach(row => {
+
+            const text = row.innerText.toLowerCase();
+
+            row.style.display =
+                text.includes(value)
+                    ? ''
+                    : 'none';
+        });
+    });
+
+</script>
 </body>
 </html>
 

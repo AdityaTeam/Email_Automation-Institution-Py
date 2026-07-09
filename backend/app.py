@@ -20,6 +20,8 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
+
+
 # Register blueprints
 app.register_blueprint(auth_bp)
 app.register_blueprint(user_bp)

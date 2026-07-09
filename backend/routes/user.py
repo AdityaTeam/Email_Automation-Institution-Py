@@ -3,6 +3,7 @@ User Panel Routes - Backup
 Handles user dashboard, email management, and email sending
 """
 
+from smtp_validator import validate_email
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
 from regex import template
 from models import EmailID, ExcelFile, Template, Requirement, EmailLog
@@ -12,6 +13,8 @@ import os
 import pandas as pd
 from werkzeug.utils import secure_filename
 from email_sender import EmailSender
+from flask import send_file
+from models import RepositoryCategory, RepositoryFile
 
 user_bp = Blueprint('user', __name__)
 
@@ -158,72 +161,172 @@ def uploads():
 @user_bp.route('/api/upload', methods=['POST'])
 @require_login
 def upload_file():
-    """Upload and process Excel/CSV"""
+
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
-    
+
     file = request.files['file']
+
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
-    
+
     filename = secure_filename(file.filename)
-    filepath = os.path.join('uploads', filename)
+
     os.makedirs('uploads', exist_ok=True)
+
+    filepath = os.path.join('uploads', filename)
+
     file.save(filepath)
-    
+
     try:
-        if filename.endswith('.csv'):
-            df = pd.read_csv(filepath)
-        elif filename.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(filepath)
+
+        if filename.endswith(('.xlsx', '.xls')):
+
+            df = pd.read_excel(
+                filepath,
+                usecols=lambda x: x.lower().strip() in [
+                    'email',
+                    'name',
+                    'institute'
+                ],
+                dtype=str,
+                engine='openpyxl',
+                na_filter=False
+            )
+
         else:
+
             os.remove(filepath)
-            return jsonify({'error': 'Invalid format. Use CSV or Excel'}), 400
-        
-        df.columns = [col.strip() for col in df.columns]
-        
+
+            return jsonify({
+                'error': 'Only Excel files allowed'
+            }), 400
+
+        df.columns = [str(col).strip() for col in df.columns]
+
         email_col = None
+
         for col in df.columns:
+
             if col.lower() == 'email':
                 email_col = col
                 break
-        
+
         if not email_col:
+
             os.remove(filepath)
-            return jsonify({'error': 'Missing Email column'}), 400
-        
+
+            return jsonify({
+                'error': 'Email column not found'
+            }), 400
+
         name_col = None
         institute_col = None
+
         for col in df.columns:
+
             if col.lower() == 'name':
                 name_col = col
+
             if col.lower() == 'institute':
                 institute_col = col
-        
+
         recipients = []
-        for _, row in df.iterrows():
-            email = str(row[email_col]).strip() if pd.notna(row[email_col]) else ''
-            if email and '@' in email:
-                recipient = {'email': email}
-                if name_col:
-                    recipient['name'] = str(row[name_col]).strip() if pd.notna(row[name_col]) else ''
-                if institute_col:
-                    recipient['institute'] = str(row[institute_col]).strip() if pd.notna(row[institute_col]) else ''
-                recipients.append(recipient)
-        
-        excel_file = ExcelFile.create(session['user_id'], filename, file.filename, recipients)
+
+        valid_count = 0
+        invalid_count = 0
+
+        validation_cache = {}
+
+        rows = df.to_dict(orient='records')
+
+        for row in rows:
+
+            email = str(row.get(email_col, '')).strip()
+
+            if not email or email.lower() == 'nan':
+                continue
+
+            if email in validation_cache:
+
+                is_valid, reason = validation_cache[email]
+
+            else:
+
+                is_valid, reason = validate_email(email)
+
+                validation_cache[email] = (is_valid, reason)
+
+            recipient = {
+                'email': email,
+                'status': 'VALID' if is_valid else 'INVALID',
+                'reason': reason,
+                'name': '',
+                'institute': ''
+            }
+
+            if name_col:
+
+                recipient['name'] = str(
+                    row.get(name_col, '')
+                ).strip()
+
+            if institute_col:
+
+                recipient['institute'] = str(
+                    row.get(institute_col, '')
+                ).strip()
+
+            if is_valid:
+                valid_count += 1
+            else:
+                invalid_count += 1
+
+            recipients.append(recipient)
+
+        excel_file = ExcelFile.create(
+            session['user_id'],
+            filename,
+            file.filename,
+            recipients
+        )
+
         os.remove(filepath)
-        
+
         return jsonify({
+
             'success': True,
+
             'file_id': str(excel_file['_id']),
-            'recipients': recipients[:10],
-            'count': len(recipients)
+
+            'total_count': len(recipients),
+
+            'valid_count': valid_count,
+
+            'invalid_count': invalid_count,
+
+            'preview_recipients': recipients[:50],
+
+            'valid_emails': [
+                r for r in recipients
+                if r['status'] == 'VALID'
+            ],
+
+            'invalid_emails': [
+                r for r in recipients
+                if r['status'] == 'INVALID'
+            ]
+
         })
+
     except Exception as e:
+
         if os.path.exists(filepath):
             os.remove(filepath)
-        return jsonify({'error': str(e)}), 500
+
+        return jsonify({
+            'error': str(e)
+        }), 500
 
 
 @user_bp.route('/api/excel-files/<file_id>', methods=['GET'])
@@ -510,4 +613,218 @@ def get_logs():
         'limit': limit,
         'total_pages': (total_count + limit - 1) // limit if total_count > 0 else 1
     })
+# ==========================
+# DATA REPOSITORY
+# ==========================
 
+@user_bp.route('/data-repository')
+@require_login
+def data_repository():
+
+    return render_template(
+        'user/data_repository.html',
+        username=session['username']
+    )
+
+
+@user_bp.route('/user/categories')
+@require_login
+def get_categories():
+
+    fixed_categories = [
+        "Industry",
+        "Doctor",
+        "Play School",
+        "General"
+    ]
+
+    result = []
+
+    for category in fixed_categories:
+
+        count = len(
+            RepositoryFile.get_by_category(category)
+        )
+
+        result.append({
+            "category": category,
+            "files_count": count
+        })
+
+    return jsonify(result)
+
+
+@user_bp.route('/user/category-page/<category>')
+@require_login
+def category_page(category):
+
+    return render_template(
+        'user/category_files.html',
+        category=category
+    )
+
+
+@user_bp.route('/user/category/<category>')
+@require_login
+def get_category_files(category):
+
+    files = RepositoryFile.get_by_category(category)
+
+    result = []
+
+    for file in files:
+
+        result.append({
+            "id": str(file["_id"]),
+            "file_name": file.get("filename", ""),
+            "status": file.get("status", "Available"),
+            "allocated_to": file.get("allocated_to", ""),
+            "download_count": file.get("download_count", 0),
+            "category": file.get("category", "General")
+        })
+
+    return jsonify(result)
+
+
+# ==========================
+# ALLOCATE FILE
+# ==========================
+
+@user_bp.route('/user/allocate-file/<file_id>', methods=['POST'])
+@require_login
+def allocate_file(file_id):
+
+    username = session['username']
+
+    db = MongoDB.get_db()
+
+    # Check if user already has an allocated file
+    existing_file = db[Collections.REPOSITORY_FILES].find_one({
+        "allocated_to": username
+    })
+
+    if existing_file:
+        return jsonify({
+            "success": False,
+            "message": f"You already have an allocated file: {existing_file.get('filename')}"
+        }), 400
+
+    file = RepositoryFile.get_by_id(file_id)
+
+    if not file:
+        return jsonify({
+            "success": False,
+            "message": "File not found"
+        }), 404
+
+    if file.get("allocated_to"):
+        return jsonify({
+            "success": False,
+            "message": f"File already allocated to {file.get('allocated_to')}"
+        }), 400
+
+    db[Collections.REPOSITORY_FILES].update_one(
+        {
+            "_id": ObjectId(file_id)
+        },
+        {
+            "$set": {
+                "allocated_to": username,
+                "status": "Allocated"
+            }
+        }
+    )
+
+    return jsonify({
+        "success": True,
+        "message": "File allocated successfully"
+    })
+
+
+# ==========================
+# UNALLOCATE FILE
+# ==========================
+
+@user_bp.route('/user/unallocate-file/<file_id>', methods=['POST'])
+@require_login
+def unallocate_file(file_id):
+
+    username = session['username']
+
+    file = RepositoryFile.get_by_id(file_id)
+
+    if not file:
+        return jsonify({
+            "success": False,
+            "message": "File not found"
+        }), 404
+
+    if file.get("allocated_to") != username:
+        return jsonify({
+            "success": False,
+            "message": f"File is allocated to {file.get('allocated_to')}"
+        }), 403
+
+    db = MongoDB.get_db()
+
+    db[Collections.REPOSITORY_FILES].update_one(
+        {
+            "_id": ObjectId(file_id)
+        },
+        {
+            "$set": {
+                "allocated_to": None,
+                "status": "Available"
+            }
+        }
+    )
+
+    return jsonify({
+        "success": True,
+        "message": "File unallocated successfully"
+    })
+
+
+# ==========================
+# DOWNLOAD FILE
+# ==========================
+
+@user_bp.route('/user/download-file/<file_id>')
+@require_login
+def download_file(file_id):
+
+    username = session['username']
+
+    file = RepositoryFile.get_by_id(file_id)
+
+    if not file:
+        return "File not found", 404
+
+    if file.get("allocated_to") != username:
+        return f"File is allocated to {file.get('allocated_to')}", 403
+
+    file_path = file.get("path")
+
+    if not file_path:
+        return "Path missing in database", 404
+
+    if not os.path.exists(file_path):
+        return f"Missing file: {file_path}", 404
+
+    db = MongoDB.get_db()
+
+    db[Collections.REPOSITORY_FILES].update_one(
+        {
+            "_id": ObjectId(file_id)
+        },
+        {
+            "$inc": {
+                "download_count": 1
+            }
+        }
+    )
+
+    return send_file(
+        file_path,
+        as_attachment=True
+    )

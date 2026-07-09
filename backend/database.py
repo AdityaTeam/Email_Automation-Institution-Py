@@ -68,6 +68,8 @@ class Collections:
     EMAIL_LOGS = 'email_logs'
     CC_EMAILS = 'cc_emails' # FEATURE 3
     CC_EMAILS = 'cc_emails'  # FEATURE 3: Global CC emails collection
+    REPOSITORY_FILES = "repository_files"
+    REPOSITORY_CATEGORIES = "repository_categories"
 
 
 # Initialize database with default data

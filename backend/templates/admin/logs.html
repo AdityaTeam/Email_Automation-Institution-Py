@@ -73,31 +73,7 @@
 <body>
     <div class="container-fluid">
         <div class="row">
-            <!-- Sidebar -->
-            <div class="col-md-2 sidebar">
-                <div class="user-info">
-                    <i class="fas fa-user-shield me-2 text-danger"></i>
-                    <strong>{{ username }}</strong>
-                    <span class="badge bg-danger ms-2">Admin</span>
-                </div>
-                <nav class="nav flex-column">
-                    <a class="nav-link" href="/admin">
-                        <i class="fas fa-home"></i> Dashboard
-                    </a>
-                    <a class="nav-link" href="/admin/users">
-                        <i class="fas fa-users"></i> Users
-                    </a>
-                    <a class="nav-link" href="/admin/templates">
-                        <i class="fas fa-file-alt"></i> Templates
-                    </a>
-                    <a class="nav-link active" href="/admin/logs">
-                        <i class="fas fa-history"></i> Logs
-                    </a>
-                    <a class="nav-link" href="/logout">
-                        <i class="fas fa-sign-out-alt"></i> Logout
-                    </a>
-                </nav>
-            </div>
+           {% include 'includes/admin_sidebar.html' %}
             
             <!-- Main Content -->
             <div class="col-md-10 main-content">
@@ -186,7 +162,7 @@
         logsTable.style.display = 'none';
         spinner.style.display = 'block';
         
-        fetch(`/api/admin/logs?page=${page}&limit=100`)
+        fetch(`/admin/logs-data?page=${page}&limit=100`)
             .then(response => response.json())
             .then(data => {
                 spinner.style.display = 'none';

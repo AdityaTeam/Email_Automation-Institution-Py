@@ -679,3 +679,38 @@ class EmailLog:
         failed = db[Collections.EMAIL_LOGS].count_documents({**query, 'status': 'failed'})
         
         return {'sent': sent, 'failed': failed}
+    
+class RepositoryCategory:
+
+    @staticmethod
+    def get_all():
+
+        db = MongoDB.get_db()
+
+        return list(
+            db.repository_categories.find()
+        )
+
+
+
+class RepositoryFile:
+
+    @staticmethod
+    def get_by_category(category):
+
+        db = MongoDB.get_db()
+
+        return list(
+            db.repository_files.find(
+                {"category":category}
+            )
+        )
+
+    @staticmethod
+    def get_by_id(file_id):
+
+        db = MongoDB.get_db()
+
+        return db.repository_files.find_one(
+            {"_id":ObjectId(file_id)}
+        )

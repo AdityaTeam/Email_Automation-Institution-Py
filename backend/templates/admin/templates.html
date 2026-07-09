@@ -126,9 +126,16 @@
                     <a class="nav-link" href="/admin/cc">
                         <i class="fas fa-copy"></i> CC Emails
                     </a>
-                    <a class="nav-link active" href="/admin/templates">
-                        <i class="fas fa-file-alt"></i> Templates
-                    </a>
+                   <a href="/admin/data-repository"
+                    class="nav-link {% if '/admin/data-repository' in request.path %}active{% endif %}">
+                   <i class="fas fa-database"></i>
+                   <span>Data Repository</span>
+                   </a>
+                   <a href="/admin/categories"
+                    class="nav-link {% if '/admin/categories' in request.path %}active{% endif %}">
+                    <i class="fas fa-folder-open"></i>
+                   <span>Categories</span>
+                  </a>
                     <a class="nav-link" href="/admin/logs">
                         <i class="fas fa-history"></i> Logs
                     </a>

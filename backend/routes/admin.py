@@ -3,15 +3,53 @@ Admin Panel Routes
 Handles admin dashboard, user management, and system control
 """
 
-from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for,  send_file
 from models import User, EmailID, ExcelFile, Template, Requirement, EmailLog
-from database import MongoDB, Collections
 from bson import ObjectId
+import os
+
+from werkzeug.utils import secure_filename
+from datetime import datetime
+admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
+
+import threading
+
+from bson import ObjectId
+
+from database import MongoDB, Collections
+
+from ai_classifier import classify_file
+
+from ai_classifier import classify_file_background
+
+"""
+Admin Panel Routes
+Handles admin dashboard, user management, and system control
+"""
+
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
+from bson import ObjectId
+from datetime import datetime
 import os
 from werkzeug.utils import secure_filename
 
-admin_bp = Blueprint('admin', __name__)
+# Database (single file setup)
+from database import MongoDB, Collections
 
+# Models (ALL inside models.py)
+from models import (
+    User,
+    EmailID,
+    ExcelFile,
+    Template,
+    Requirement,
+    EmailLog,
+    CcEmail,
+    RepositoryFile
+)
+
+# AI Classifier (root file)
+from ai_classifier import classify_file
 
 def require_admin(f):
     from functools import wraps
@@ -37,7 +75,7 @@ def require_admin(f):
     return decorated_function
 
 
-@admin_bp.route('/admin')
+@admin_bp.route('/')
 @require_admin
 def dashboard():
     """Admin dashboard"""
@@ -84,7 +122,7 @@ def dashboard():
                            users=user_list)
 
 
-@admin_bp.route('/admin/users')
+@admin_bp.route('/users')
 @require_admin
 def users():
     """User management page"""
@@ -112,7 +150,7 @@ def users():
                            users=user_data)
 
 
-@admin_bp.route('/admin/user/<user_id>')
+@admin_bp.route('/user/<user_id>')
 @require_admin
 def view_user(user_id):
     """View user details with passwords"""
@@ -156,7 +194,7 @@ def view_user(user_id):
                            stats=stats)
 
 
-@admin_bp.route('/admin/users/<user_id>', methods=['DELETE'])
+@admin_bp.route('/users/<user_id>', methods=['DELETE'])
 @require_admin
 def delete_user(user_id):
     """Delete a user"""
@@ -199,7 +237,7 @@ def reset_email_password(email_id):
 
 # ==================== Template Management ====================
 
-@admin_bp.route('/admin/templates')
+@admin_bp.route('/templates')
 @require_admin
 def templates():
     requirements = Requirement.get_all()
@@ -388,7 +426,7 @@ def delete_template(template_id):
 
 # ==================== Logs ====================
 
-@admin_bp.route('/admin/logs')
+@admin_bp.route('/logs')
 @require_admin
 def logs():
     """View all email logs"""
@@ -419,7 +457,7 @@ def logs():
                            logs=logs_list)
 
 
-@admin_bp.route('/api/admin/logs', methods=['GET'])
+@admin_bp.route('/logs-data', methods=['GET'])
 @require_admin
 def get_all_logs():
     """Get paginated email logs (FEATURE 2)"""
@@ -511,7 +549,7 @@ def delete_cc_email(cc_id):
     return jsonify({'error': 'Failed to delete'}), 400
 
 
-@admin_bp.route('/admin/cc')
+@admin_bp.route('/cc')
 @require_admin
 def cc_management():
     """CC Emails and Logo management page"""
@@ -573,5 +611,600 @@ def get_stats():
         'emails_sent': stats['sent'],
         'emails_failed': stats['failed']
     })
+# ==========================================
+# ADMIN DATA REPOSITORY PAGE
+# ==========================================
+
+@admin_bp.route('/data-repository')
+@require_admin
+def data_repository():
+
+    return render_template(
+        'admin/data_repository.html'
+    )
 
 
+# ==========================================
+# ADMIN CATEGORIES PAGE
+# ==========================================
+
+@admin_bp.route('/categories')
+@require_admin
+def categories_page():
+
+    return render_template(
+        'admin/categories.html'
+    )
+
+
+# ==========================================
+# CATEGORY API
+# ==========================================
+
+@admin_bp.route('/categories-api')
+@require_admin
+def admin_categories_api():
+
+    fixed_categories = [
+        "Industry",
+        "Doctor",
+        "Play School",
+        "General"
+    ]
+
+    result = []
+
+    for category in fixed_categories:
+
+        files = RepositoryFile.get_by_category(category)
+
+        result.append({
+            "category": category,
+            "files_count": len(files)
+        })
+
+    return jsonify(result)
+
+
+# ==========================================
+# CATEGORY PAGE
+# ==========================================
+
+@admin_bp.route('/category-page/<category>')
+@require_admin
+def admin_category_page(category):
+
+    return render_template(
+        'admin/category_files.html',
+        category=category
+    )
+
+
+# ==========================================
+# CATEGORY FILES API
+# ==========================================
+
+@admin_bp.route('/category/<category>')
+@require_admin
+def admin_category_files(category):
+
+    files = RepositoryFile.get_by_category(category)
+
+    result = []
+
+    for file in files:
+
+        created_at = file.get("created_at")
+
+        if created_at:
+            created_at = created_at.strftime("%d-%m-%Y")
+        else:
+            created_at = "-"
+
+        result.append({
+
+            "id": str(file["_id"]),
+
+            "file_name": file.get(
+                "filename",
+                ""
+            ),
+
+            "file_type": file.get(
+                "file_type",
+                "-"
+            ),
+
+            "file_size": file.get(
+                "file_size",
+                0
+            ),
+
+            "created_at": created_at,
+
+            "status": file.get(
+                "status",
+                "Available"
+            ),
+
+            "allocated_to": file.get(
+                "allocated_to",
+                None
+            ),
+
+            "download_count": file.get(
+                "download_count",
+                0
+            ),
+
+            "category": file.get(
+                "category",
+                "General"
+            )
+        })
+
+    return jsonify(result)
+
+# ==========================================
+# GET ALL USERS
+# ==========================================
+
+@admin_bp.route('/get-users')
+@require_admin
+def get_users():
+
+    db = MongoDB.get_db()
+
+    users = list(
+        db[Collections.USERS].find({})
+    )
+
+    result = []
+
+    for user in users:
+
+        result.append({
+            "username": user.get("username")
+        })
+
+    return jsonify(result)
+
+
+# ==========================================
+# REPOSITORY FILE LIST
+# ==========================================
+
+@admin_bp.route('/repository-files')
+@require_admin
+def repository_files():
+
+    db = MongoDB.get_db()
+
+    files = list(
+        db[Collections.REPOSITORY_FILES].find({})
+    )
+
+    result = []
+
+    for file in files:
+
+        created_at = file.get("created_at")
+
+        if created_at:
+            created_at = created_at.strftime("%d-%m-%Y")
+        else:
+            created_at = "-"
+
+        result.append({
+
+            "id": str(file["_id"]),
+
+            "file_name": file.get(
+                "filename",
+                ""
+            ),
+
+            "file_type": file.get(
+                "file_type",
+                "-"
+            ),
+
+            "file_size": file.get(
+                "file_size",
+                0
+            ),
+
+            "category": file.get(
+                "category",
+                "General"
+            ),
+
+            "created_at": created_at,
+
+            "status": file.get(
+                "status",
+                "Available"
+            ),
+
+            "allocated_to": file.get(
+                "allocated_to",
+                None
+            ),
+
+            "download_count": file.get(
+                "download_count",
+                0
+            )
+        })
+
+    return jsonify(result)
+
+def run_classification(file_id, file_path, filename):
+
+    try:
+
+        category = classify_file_background(
+            file_path,
+            filename
+        )
+
+        db = MongoDB.get_db()
+
+        db[
+            Collections.REPOSITORY_FILES
+        ].update_one(
+            {
+                "_id": ObjectId(file_id)
+            },
+            {
+                "$set": {
+                    "category": category
+                }
+            }
+        )
+
+        print(f"✅ {filename} classified as {category}")
+
+    except Exception as e:
+
+        print("❌ Classification Error:", e)
+        
+@admin_bp.route('/upload-dataset', methods=['POST'])
+@require_admin
+def upload_dataset():
+
+    if 'files' not in request.files:
+        return jsonify({
+            'success': False,
+            'message': 'No files found'
+        }), 400
+
+    files = request.files.getlist('files')
+
+    if not files:
+        return jsonify({
+            'success': False,
+            'message': 'No files selected'
+        }), 400
+
+    upload_dir = "uploads/repository"
+    os.makedirs(upload_dir, exist_ok=True)
+
+    db = MongoDB.get_db()
+
+    saved_files = []
+
+    for file in files:
+
+        if file.filename == "":
+            continue
+
+        filename = secure_filename(file.filename)
+
+        path = os.path.join(
+            upload_dir,
+            filename
+        )
+
+        file.save(path)
+
+        file_size = round(
+            os.path.getsize(path) / 1024,
+            2
+        )
+
+        file_type = os.path.splitext(
+            filename
+        )[1].replace(
+            ".",
+            ""
+        ).upper()
+
+        doc = {
+
+            "filename": filename,
+
+            "path": path,
+
+            "file_type": file_type,
+
+            "file_size": file_size,
+
+            "status": "Available",
+
+            "category": "Processing",
+
+            "tags": [],
+
+            "data_type": "Unknown",
+
+            "allocated_to": None,
+
+            "download_count": 0,
+
+            "created_at": datetime.utcnow()
+        }
+
+        result = db[
+            Collections.REPOSITORY_FILES
+        ].insert_one(doc)
+
+        file_id = str(
+            result.inserted_id
+        )
+
+        # Background AI Classification
+        threading.Thread(
+            target=run_classification,
+            args=(
+                file_id,
+                path,
+                filename
+            ),
+            daemon=True
+        ).start()
+
+        saved_files.append({
+            "id": file_id,
+            "filename": filename
+        })
+
+    return jsonify({
+        "success": True,
+        "message": f"{len(saved_files)} file(s) uploaded successfully",
+        "files": saved_files
+    })
+
+
+# ==========================================
+# DOWNLOAD FILE
+# ==========================================
+
+@admin_bp.route('/download-file/<file_id>')
+@require_admin
+def download_file(file_id):
+
+    db = MongoDB.get_db()
+
+    try:
+
+        file = db[
+            Collections.REPOSITORY_FILES
+        ].find_one({
+            "_id": ObjectId(file_id)
+        })
+
+        if not file:
+            return "File not found", 404
+
+        file_path = file.get("path")
+
+        if not file_path:
+            return "No file path stored", 404
+
+        if not os.path.exists(file_path):
+            return f"Missing file: {file_path}", 404
+
+        db[
+            Collections.REPOSITORY_FILES
+        ].update_one(
+            {
+                "_id": ObjectId(file_id)
+            },
+            {
+                "$inc": {
+                    "download_count": 1
+                }
+            }
+        )
+
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=file.get(
+                "filename",
+                os.path.basename(file_path)
+            )
+        )
+
+    except Exception as e:
+
+        return str(e), 500
+
+
+# ==========================================
+# DELETE FILE
+# ==========================================
+
+@admin_bp.route('/delete-file/<file_id>', methods=['DELETE'])
+@require_admin
+def delete_file(file_id):
+
+    db = MongoDB.get_db()
+
+    file = db[
+        Collections.REPOSITORY_FILES
+    ].find_one({
+        "_id": ObjectId(file_id)
+    })
+
+    if not file:
+        return jsonify({
+            "success": False,
+            "message": "File not found"
+        }), 404
+
+    if file.get("allocated_to"):
+
+        return jsonify({
+            "success": False,
+            "message": f"Cannot delete. File is allocated to {file.get('allocated_to')}"
+        }), 400
+
+    file_path = file.get("path")
+
+    if file_path and os.path.exists(file_path):
+        os.remove(file_path)
+
+    db[
+        Collections.REPOSITORY_FILES
+    ].delete_one({
+        "_id": ObjectId(file_id)
+    })
+
+    return jsonify({
+        "success": True,
+        "message": "File deleted successfully"
+    })
+
+
+# ==========================================
+# ALLOCATE FILE
+# ==========================================
+
+@admin_bp.route('/allocate-file/<file_id>', methods=['POST'])
+@require_admin
+def allocate_file(file_id):
+
+    data = request.get_json()
+
+    username = data.get("username")
+
+    if not username:
+
+        return jsonify({
+            "success": False,
+            "message": "Username required"
+        }), 400
+
+    db = MongoDB.get_db()
+
+    # Only one file per user
+    existing = db[
+        Collections.REPOSITORY_FILES
+    ].find_one({
+        "allocated_to": username
+    })
+
+    if existing:
+
+        return jsonify({
+            "success": False,
+            "message": f"{username} already has an allocated file"
+        }), 400
+
+    file = db[
+        Collections.REPOSITORY_FILES
+    ].find_one({
+        "_id": ObjectId(file_id)
+    })
+
+    if not file:
+
+        return jsonify({
+            "success": False,
+            "message": "File not found"
+        }), 404
+
+    if file.get("allocated_to"):
+
+        return jsonify({
+            "success": False,
+            "message": f"Already allocated to {file.get('allocated_to')}"
+        }), 400
+
+    result = db[
+        Collections.REPOSITORY_FILES
+    ].update_one(
+        {
+            "_id": ObjectId(file_id)
+        },
+        {
+            "$set": {
+                "allocated_to": username,
+                "status": "Allocated"
+            }
+        }
+    )
+
+    if result.modified_count:
+
+        return jsonify({
+            "success": True,
+            "message": f"File allocated to {username}"
+        })
+
+    return jsonify({
+        "success": False,
+        "message": "Allocation failed"
+    }), 400
+
+
+# ==========================================
+# UNALLOCATE FILE
+# ==========================================
+
+@admin_bp.route('/unallocate-file/<file_id>', methods=['POST'])
+@require_admin
+def unallocate_file(file_id):
+
+    db = MongoDB.get_db()
+
+    file = db[
+        Collections.REPOSITORY_FILES
+    ].find_one({
+        "_id": ObjectId(file_id)
+    })
+
+    if not file:
+
+        return jsonify({
+            "success": False,
+            "message": "File not found"
+        }), 404
+
+    result = db[
+        Collections.REPOSITORY_FILES
+    ].update_one(
+        {
+            "_id": ObjectId(file_id)
+        },
+        {
+            "$set": {
+                "allocated_to": None,
+                "status": "Available"
+            }
+        }
+    )
+
+    if result.modified_count:
+
+        return jsonify({
+            "success": True,
+            "message": "File unallocated successfully"
+        })
+
+    return jsonify({
+        "success": False,
+        "message": "Unallocation failed"
+    }), 400
