@@ -146,19 +146,7 @@ class EmailSender:
         else:
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-        # ✅ Attach LOGO from folder
-        logo_path = os.path.join(os.getcwd(), "backend", "uploads", "logo", "company_logo.jpeg")
-        if os.path.exists(logo_path):
-            try:
-                with open(logo_path, 'rb') as f:
-                    img = MIMEImage(f.read())
-                    img.add_header('Content-Disposition', 'attachment', filename="company_logo.jpeg")
-                    msg.attach(img)
-                    print("✅ Logo attached")
-            except Exception as e:
-                print("❌ Logo attach error:", e)
-        else:
-            print("⚠️ Logo not found at:", logo_path)
+
 
         # ✅ Attach files
         import mimetypes
@@ -166,6 +154,7 @@ class EmailSender:
         from email import encoders
 
         for att_path in attachments:
+            print(f"Attaching file: {att_path}")
             try:
                 if not os.path.exists(att_path):
                     print(f"❌ File not found: {att_path}")
@@ -182,20 +171,24 @@ class EmailSender:
 
                 part = MIMEBase(main_type, sub_type)
                 part.set_payload(file_data)
-
                 encoders.encode_base64(part)
 
                 filename = os.path.basename(att_path)
+                if "_temp_logos" in att_path or "temp_logos" in att_path:
+                    if "_" in filename:
+                        filename = filename.split("_", 1)[1]
+                        
                 part.add_header(
                     "Content-Disposition",
                     f'attachment; filename="{filename}"'
                 )
 
                 msg.attach(part)
-                print(f"✅ Attached: {filename}")
+                print(f"✅ Attached successfully: {filename}")
 
             except Exception as e:
-                print(f"❌ Attachment error: {e}")
+                print(f"❌ Attachment error for {att_path}: {e}")
+                
         return msg
     
     def ensure_connection(self):

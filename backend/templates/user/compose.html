@@ -122,6 +122,18 @@
                                             <small class="text-muted">Optional - overrides username in From header</small>
                                         </div>
                                     </div>
+                                    
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label class="form-label">Company Logo (Optional)</label>
+                                            <input type="file" class="form-control" id="companyLogo" accept=".png,.jpg,.jpeg">
+                                            <small class="text-muted">Supported: PNG, JPG, JPEG (Max: 5MB)</small>
+                                            <div id="logoPreviewContainer" class="mt-2" style="display: none;">
+                                                <img id="logoPreview" src="" alt="Logo Preview" style="max-height: 80px; max-width: 100%; border-radius: 4px; border: 1px solid #ddd;">
+                                                <button type="button" class="btn btn-sm btn-outline-danger mt-1 d-block w-100" id="removeLogoBtn">Remove Logo</button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="template-info" id="templateInfo" style="display: none;">
                                     <i class="fas fa-info-circle"></i> <span id="templateInfoText"></span>
@@ -700,20 +712,38 @@ document.getElementById('exportInvalidBtn')
                 const selectedTemplate = document.getElementById('templateSelect').value;
                 console.log('Sending with CC:', ccEmails);
                 
+                // Add custom logo to payload
+                const logoInput = document.getElementById('companyLogo');
+                let logoBase64 = null;
+                let logoFilename = null;
+                if (logoInput && logoInput.files.length > 0) {
+                    const file = logoInput.files[0];
+                    logoFilename = file.name;
+                    logoBase64 = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.readAsDataURL(file);
+                    });
+                }
+                
+                const payload = {
+                    sender_email_id: senderEmailId,
+                    from_name: senderName,
+                    recipients: recipients,
+                    cc_emails: ccEmails,
+                    template_id: selectedTemplate,
+                    subject: subject,
+                    body: body,
+                    is_html: isHtml,
+                    signature_data: signatureData,
+                    logo_filename: logoFilename,
+                    logo_base64: logoBase64
+                };
+                
                 const response = await fetch('/api/send', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sender_email_id: senderEmailId,
-                        from_name: senderName,
-                        recipients: recipients,
-                        cc_emails: ccEmails,  // ✅ Fixed: Use actual CC selection
-                        template_id: selectedTemplate,
-                        subject: subject,
-                        body: body,
-                        is_html: isHtml,
-                        signature_data: signatureData
-                    })
+                    body: JSON.stringify(payload)
                 });
                 
                 const data = await response.json();
@@ -861,7 +891,50 @@ document.getElementById('emailSearch')
         });
     });
 
-</script>
+        // Logo preview and validation
+        const logoInput = document.getElementById('companyLogo');
+        if (logoInput) {
+            logoInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                const previewContainer = document.getElementById('logoPreviewContainer');
+                const previewImg = document.getElementById('logoPreview');
+                
+                if (!file) {
+                    previewContainer.style.display = 'none';
+                    return;
+                }
+                
+                // Validate size (5MB)
+                if (file.size > 5 * 1024 * 1024) {
+                    showAlert('danger', 'Logo file size exceeds 5MB limit.');
+                    this.value = '';
+                    previewContainer.style.display = 'none';
+                    return;
+                }
+                
+                // Validate type
+                if (!['image/jpeg', 'image/jpg', 'image/png'].includes(file.type)) {
+                    showAlert('danger', 'Only PNG, JPG, and JPEG formats are supported.');
+                    this.value = '';
+                    previewContainer.style.display = 'none';
+                    return;
+                }
+                
+                // Show preview
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImg.src = e.target.result;
+                    previewContainer.style.display = 'block';
+                }
+                reader.readAsDataURL(file);
+            });
+            
+            document.getElementById('removeLogoBtn').addEventListener('click', function() {
+                logoInput.value = '';
+                document.getElementById('logoPreviewContainer').style.display = 'none';
+                document.getElementById('logoPreview').src = '';
+            });
+        }
+    </script>
 </body>
 </html>
-

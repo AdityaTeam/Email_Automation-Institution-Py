@@ -578,6 +578,27 @@ def _send_emails_impl():
     is_html = data.get('is_html', False)
     separate_threads = data.get('separate_threads', True)
     signature_data = data.get('signature_data', {})
+    
+    logo_filename = data.get('logo_filename')
+    logo_base64 = data.get('logo_base64')
+    uploaded_logo_path = None
+    
+    if logo_filename and logo_base64:
+        try:
+            import base64, uuid
+            header, encoded = logo_base64.split(",", 1) if "," in logo_base64 else ("", logo_base64)
+            temp_dir = os.path.join(os.getcwd(), 'backend', 'uploads', 'temp_logos')
+            os.makedirs(temp_dir, exist_ok=True)
+            uploaded_logo_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{logo_filename}")
+            with open(uploaded_logo_path, "wb") as f:
+                f.write(base64.b64decode(encoded))
+            print(f"Uploaded filename: {logo_filename}")
+            print(f"File size: {os.path.getsize(uploaded_logo_path)} bytes")
+            print(f"Temporary save path: {uploaded_logo_path}")
+            attachments.append(uploaded_logo_path)
+        except Exception as e:
+            print("Failed to parse and save custom logo:", e)
+            uploaded_logo_path = None
 
     if not isinstance(cc_emails, list):
         cc_emails = []
@@ -687,17 +708,26 @@ def _send_emails_impl():
         print("Attachment list:", attachments)
         print("===========================================\n")
         
-        result = sender.send_bulk_emails(
-            personalized_recipients,
-            subject,
-            "",
-            from_name,
-            cc_emails=cc_emails,
-            attachments=attachments,
-            is_html=is_html,
-            delay_between_emails=5,
-            separate_threads=separate_threads
-        )
+        print(f"Attachment list before calling EmailSender: {attachments}")
+        
+        try:
+            result = sender.send_bulk_emails(
+                personalized_recipients,
+                subject,
+                "",
+                from_name,
+                cc_emails=cc_emails,
+                attachments=attachments,
+                is_html=is_html,
+                delay_between_emails=5,
+                separate_threads=separate_threads
+            )
+        finally:
+            if uploaded_logo_path and os.path.exists(uploaded_logo_path):
+                try:
+                    os.remove(uploaded_logo_path)
+                except Exception as e:
+                    print(f"Failed to clean up temp logo: {e}")
         
         sent_entries = result.get("sent_entries", [])
         failed_list = result.get("failed", [])
