@@ -1,0 +1,12 @@
+.env
+
+backend/credentials.json
+
+__pycache__/
+*.pyc
+
+flask_session/
+
+Book1.xlsx
+temp.xlsx
+recipients.csv

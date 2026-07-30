@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>{{ category }}</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static',
+          filename='css/style.css') }}">
+
+    <style>
+
+        body{
+            margin:0;
+            background:#f5f7fa;
+            font-family:'Segoe UI',sans-serif;
+        }
+
+        .main-content{
+            padding:30px;
+        }
+
+        .top-header{
+            margin-bottom:25px;
+        }
+
+        .page-title{
+            font-size:28px;
+            font-weight:600;
+            color:#333;
+        }
+
+        .section{
+            background:#fff;
+            border-radius:12px;
+            padding:20px;
+            box-shadow:0 2px 10px rgba(0,0,0,0.08);
+        }
+
+        .section-header{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            margin-bottom:20px;
+        }
+
+        .section-title{
+            margin:0;
+            color:#333;
+        }
+
+        .table-container{
+            overflow-x:auto;
+        }
+
+        table{
+            width:100%;
+            border-collapse:collapse;
+        }
+
+        th{
+            background:#f8f9fa;
+            padding:14px;
+            text-align:left;
+            border-bottom:2px solid #ddd;
+        }
+
+        td{
+            padding:14px;
+            border-bottom:1px solid #eee;
+        }
+
+        tr:hover{
+            background:#fafafa;
+        }
+
+        .btn{
+            border:none;
+            border-radius:6px;
+            padding:8px 14px;
+            cursor:pointer;
+            color:white;
+            margin-right:5px;
+            font-size:14px;
+        }
+
+        .btn-primary{
+            background:#0d6efd;
+        }
+
+        .btn-success{
+            background:#198754;
+        }
+
+        .btn-danger{
+            background:#dc3545;
+        }
+
+        .btn-secondary{
+            background:#6c757d;
+        }
+
+        .btn:hover{
+            opacity:.9;
+        }
+
+        .status-available{
+            color:#198754;
+            font-weight:600;
+        }
+
+        .status-allocated{
+            color:#dc3545;
+            font-weight:600;
+        }
+
+        .empty-row{
+            text-align:center;
+            padding:30px;
+            color:#777;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+<div class="app-layout">
+
+    <main class="main-content">
+
+        <header class="top-header">
+
+            <h1 class="page-title">
+                📂 {{ category }}
+            </h1>
+
+        </header>
+
+        <div class="content-container">
+
+            <div class="section">
+
+                <div class="section-header">
+
+                    <h2 class="section-title">
+                        Files
+                    </h2>
+
+                    <button
+                        class="btn btn-secondary"
+                        onclick="history.back()">
+
+                        ← Back
+
+                    </button>
+
+                </div>
+
+                <div class="table-container">
+
+                    <table>
+
+                        <thead>
+
+                        <tr>
+
+                            <th>File Name</th>
+                            <th>Status</th>
+                            <th>Allocated To</th>
+                            <th>Downloads</th>
+                            <th>Actions</th>
+
+                        </tr>
+
+                        </thead>
+
+                        <tbody id="fileTable">
+
+                        <tr>
+                            <td colspan="5" class="empty-row">
+                                Loading...
+                            </td>
+                        </tr>
+
+                        </tbody>
+
+                    </table>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </main>
+
+</div>
+
+<script>
+
+const category =
+"{{ category }}";
+
+const currentUser =
+"{{ session['username'] }}";
+
+async function loadFiles() {
+
+    try {
+
+        const response =
+        await fetch(
+            "/user/category/" +
+            encodeURIComponent(category)
+        );
+
+        const files =
+        await response.json();
+
+        const table =
+        document.getElementById(
+            "fileTable"
+        );
+
+        if (
+            !files ||
+            files.length === 0
+        ) {
+
+            table.innerHTML = `
+
+            <tr>
+
+                <td colspan="5"
+                    class="empty-row">
+
+                    No files found
+
+                </td>
+
+            </tr>
+
+            `;
+
+            return;
+        }
+
+        table.innerHTML = "";
+
+        files.forEach(file => {
+
+            let actions = "";
+
+            const allocatedTo =
+            file.allocated_to;
+
+            if (!allocatedTo) {
+
+                actions += `
+
+                <button
+                    class="btn btn-success"
+                    onclick="allocateFile('${file.id}')">
+
+                    Allocate
+
+                </button>
+
+                `;
+            }
+
+            if (
+                allocatedTo === currentUser
+            ) {
+
+                actions += `
+
+                <button
+                    class="btn btn-danger"
+                    onclick="unallocateFile('${file.id}')">
+
+                    Unallocate
+
+                </button>
+
+                `;
+
+                actions += `
+
+                <button
+                    class="btn btn-primary"
+                    onclick="downloadFile('${file.id}')">
+
+                    Download
+
+                </button>
+
+                `;
+            }
+
+            table.innerHTML += `
+
+            <tr>
+
+                <td>
+                    ${file.file_name}
+                </td>
+
+                <td>
+
+                    <span class="${
+                        file.status === "Allocated"
+                        ? "status-allocated"
+                        : "status-available"
+                    }">
+
+                        ${file.status}
+
+                    </span>
+
+                </td>
+
+                <td>
+                    ${allocatedTo || "-"}
+                </td>
+
+                <td>
+                    ${file.download_count || 0}
+                </td>
+
+                <td>
+                    ${actions}
+                </td>
+
+            </tr>
+
+            `;
+
+        });
+
+    }
+
+    catch(error){
+
+        console.error(error);
+
+        document.getElementById(
+            "fileTable"
+        ).innerHTML = `
+
+        <tr>
+
+            <td colspan="5"
+                class="empty-row">
+
+                Failed to load files
+
+            </td>
+
+        </tr>
+
+        `;
+
+    }
+
+}
+
+async function allocateFile(id) {
+
+    const response =
+    await fetch(
+        "/user/allocate-file/" + id,
+        {
+            method:"POST"
+        }
+    );
+
+    const data =
+    await response.json();
+
+    alert(data.message);
+
+    loadFiles();
+
+}
+
+async function unallocateFile(id) {
+
+    const response =
+    await fetch(
+        "/user/unallocate-file/" + id,
+        {
+            method:"POST"
+        }
+    );
+
+    const data =
+    await response.json();
+
+    alert(data.message);
+
+    loadFiles();
+
+}
+
+function downloadFile(id){
+
+    window.location.href =
+    "/user/download-file/" + id;
+
+}
+
+loadFiles();
+
+</script>
+
+</body>
+</html>
