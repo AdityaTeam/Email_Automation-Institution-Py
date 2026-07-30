@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logo Management - Admin Panel</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #4a90d9;
+            --bg-soft: #f5f7fa;
+        }
+
+        body {
+            background: var(--bg-soft);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .sidebar {
+            min-height: 100vh;
+            background: white;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .sidebar .nav-link {
+            color: #333;
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin: 5px 10px;
+            transition: all 0.3s;
+        }
+
+        .sidebar .nav-link:hover,
+        .sidebar .nav-link.active {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .sidebar .nav-link i {
+            margin-right: 10px;
+        }
+
+        .main-content {
+            padding: 30px;
+        }
+
+        .card {
+            border: none;
+            border-radius: 14px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .card-header {
+            background: white;
+            border-bottom: 1px solid #eef1f4;
+            padding: 16px 20px;
+            font-weight: 600;
+        }
+
+        .logo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 18px;
+        }
+
+        .logo-card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            border: 1px solid #eef1f4;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .logo-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        }
+
+        .logo-card .preview {
+            height: 180px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(180deg, #fbfcfe 0%, #f2f6fb 100%);
+            padding: 18px;
+        }
+
+        .logo-card .preview img {
+            max-width: 100%;
+            max-height: 140px;
+            object-fit: contain;
+        }
+
+        .logo-card .body {
+            padding: 16px;
+        }
+
+        .logo-meta {
+            color: #667085;
+            font-size: 0.92rem;
+        }
+
+        .logo-actions .btn {
+            min-width: 36px;
+        }
+
+        .search-shell {
+            background: white;
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+        }
+
+        .user-info {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 10px;
+        }
+
+        .stat-pill {
+            background: white;
+            border-radius: 14px;
+            padding: 14px 16px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .stat-pill i {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #eff6ff;
+            color: var(--primary-color);
+        }
+
+        .upload-dropzone {
+            border: 2px dashed #cbd5e1;
+            border-radius: 14px;
+            background: #fafcff;
+            padding: 18px;
+            text-align: center;
+            cursor: pointer;
+        }
+
+        .upload-dropzone.dragover {
+            border-color: var(--primary-color);
+            background: #f0f7ff;
+        }
+
+        .modal-preview {
+            width: 100%;
+            max-height: 180px;
+            object-fit: contain;
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 12px;
+        }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-2 sidebar">
+            <div class="user-info">
+                <i class="fas fa-user-shield me-2 text-danger"></i>
+                <strong>{{ username }}</strong>
+                <span class="badge bg-danger ms-2">Admin</span>
+            </div>
+            <nav class="nav flex-column">
+                <a class="nav-link" href="/admin"><i class="fas fa-home"></i> Dashboard</a>
+                <a class="nav-link" href="/admin/users"><i class="fas fa-users"></i> Users</a>
+                <a class="nav-link" href="/admin/templates"><i class="fas fa-file-alt"></i> Templates</a>
+                <a class="nav-link" href="/admin/cc"><i class="fas fa-copy"></i> CC Emails</a>
+                <a class="nav-link active" href="/admin/logos"><i class="fas fa-image"></i> Logo Management</a>
+                <a class="nav-link" href="/admin/logs"><i class="fas fa-history"></i> Logs</a>
+                <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+            </nav>
+        </div>
+
+        <div class="col-md-10 main-content">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+                <div>
+                    <h2 class="mb-1"><i class="fas fa-image text-primary"></i> Logo Management</h2>
+                    <p class="text-muted mb-0">Admin-managed company logos for signatures and compose-time selection.</p>
+                </div>
+                <button class="btn btn-primary" onclick="openAddLogoModal()">
+                    <i class="fas fa-plus me-2"></i> Upload Logo
+                </button>
+            </div>
+
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="stat-pill">
+                        <i class="fas fa-layer-group"></i>
+                        <div>
+                            <div class="text-muted small">Total Logos</div>
+                            <div class="fs-5 fw-bold" id="totalLogoCount">{{ logos|length }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-pill">
+                        <i class="fas fa-check-circle"></i>
+                        <div>
+                            <div class="text-muted small">Active</div>
+                            <div class="fs-5 fw-bold" id="activeLogoCount">{{ logos|selectattr('status', 'equalto', 'active')|list|length }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-pill">
+                        <i class="fas fa-ban"></i>
+                        <div>
+                            <div class="text-muted small">Inactive</div>
+                            <div class="fs-5 fw-bold" id="inactiveLogoCount">{{ logos|selectattr('status', 'equalto', 'inactive')|list|length }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="search-shell mb-4">
+                <div class="row g-3 align-items-center">
+                    <div class="col-md-8">
+                        <input type="text" class="form-control form-control-lg" id="searchInput" placeholder="Search by logo name or company name">
+                    </div>
+                    <div class="col-md-4 text-md-end">
+                        <button class="btn btn-outline-secondary me-2" onclick="refreshLogos()"><i class="fas fa-rotate me-1"></i> Refresh</button>
+                        <span class="badge bg-primary" id="visibleCount">0 visible</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="logo-grid" id="logoGrid"></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="logoModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="logoModalTitle">Upload Logo</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="logoForm">
+                <div class="modal-body">
+                    <input type="hidden" id="logoId">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Logo Name</label>
+                            <input type="text" class="form-control" id="logoName" placeholder="HV Logo" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Company Name</label>
+                            <input type="text" class="form-control" id="companyName" placeholder="Hansraj Ventures" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Status</label>
+                            <select class="form-select" id="logoStatus">
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Logo Image</label>
+                            <div class="upload-dropzone" id="logoDropzone" onclick="document.getElementById('logoFile').click()">
+                                <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-2"></i>
+                                <div class="small text-muted" id="dropzoneText">Click to upload or replace the image</div>
+                                <input type="file" id="logoFile" class="d-none" accept="image/*">
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Preview</label>
+                            <div class="text-center">
+                                <img id="logoPreview" class="modal-preview d-none" alt="Logo preview">
+                                <div id="logoPreviewEmpty" class="text-muted border rounded-3 py-5 bg-light">No image selected</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="saveLogoBtn">Save Logo</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div id="alertContainer" style="position: fixed; top: 20px; right: 20px; z-index: 9999;"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    let logos = {{ logos|tojson }};
+    let filteredLogos = [...logos];
+    let currentPreviewDataUrl = null;
+    let logoMap = {};
+
+    function showAlert(type, message) {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+        alertDiv.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+        document.getElementById('alertContainer').appendChild(alertDiv);
+        setTimeout(() => alertDiv.remove(), 4500);
+    }
+
+    function renderLogos(list) {
+        const grid = document.getElementById('logoGrid');
+        grid.innerHTML = '';
+        logoMap = {};
+        document.getElementById('visibleCount').textContent = `${list.length} visible`;
+        document.getElementById('totalLogoCount').textContent = logos.length;
+        document.getElementById('activeLogoCount').textContent = logos.filter(item => item.status === 'active').length;
+        document.getElementById('inactiveLogoCount').textContent = logos.filter(item => item.status === 'inactive').length;
+
+        if (!list.length) {
+            grid.innerHTML = '<div class="text-center text-muted py-5">No logos found</div>';
+            return;
+        }
+
+        list.forEach(logo => {
+            logoMap[String(logo._id)] = logo;
+            const card = document.createElement('div');
+            card.className = 'logo-card';
+            card.innerHTML = `
+                <div class="preview">
+                    <img src="${logo.image_url}" alt="${logo.logo_name || 'Logo'}">
+                </div>
+                <div class="body">
+                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                        <div>
+                            <h5 class="mb-1">${logo.logo_name || 'Untitled Logo'}</h5>
+                            <div class="logo-meta">${logo.company_name || ''}</div>
+                        </div>
+                        <span class="badge ${logo.status === 'active' ? 'bg-success' : 'bg-secondary'}">${logo.status || 'inactive'}</span>
+                    </div>
+                    <div class="small text-muted mb-3">${logo.original_filename || logo.file_name || ''}</div>
+                    <div class="d-flex flex-wrap gap-2 logo-actions">
+                        <button class="btn btn-outline-primary btn-sm" onclick="openEditLogoModalById('${logo._id}')"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-outline-${logo.status === 'active' ? 'warning' : 'success'} btn-sm" onclick="toggleLogo('${logo._id}')"><i class="fas fa-power-off"></i></button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deleteLogo('${logo._id}')"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    function applySearch() {
+        const query = document.getElementById('searchInput').value.trim().toLowerCase();
+        filteredLogos = logos.filter(logo => {
+            const haystack = `${logo.logo_name || ''} ${logo.company_name || ''} ${logo.original_filename || ''}`.toLowerCase();
+            return haystack.includes(query);
+        });
+        renderLogos(filteredLogos);
+    }
+
+    function refreshLogos() {
+        fetch('/api/admin/logos')
+            .then(response => response.json())
+            .then(data => {
+                logos = Array.isArray(data.logos) ? data.logos : [];
+                filteredLogos = [...logos];
+                renderLogos(filteredLogos);
+            })
+            .catch(error => console.error('Failed to refresh logos:', error));
+    }
+
+    function openAddLogoModal() {
+        document.getElementById('logoModalTitle').textContent = 'Upload Logo';
+        document.getElementById('logoForm').reset();
+        document.getElementById('logoId').value = '';
+        document.getElementById('logoPreview').classList.add('d-none');
+        document.getElementById('logoPreviewEmpty').classList.remove('d-none');
+        document.getElementById('dropzoneText').textContent = 'Click to upload or replace the image';
+        currentPreviewDataUrl = null;
+        new bootstrap.Modal(document.getElementById('logoModal')).show();
+    }
+
+    function openEditLogoModalById(logoId) {
+        const logo = logoMap[String(logoId)];
+        if (!logo) {
+            showAlert('warning', 'Logo not found');
+            return;
+        }
+        document.getElementById('logoModalTitle').textContent = 'Edit Logo';
+        document.getElementById('logoId').value = logo._id;
+        document.getElementById('logoName').value = logo.logo_name || '';
+        document.getElementById('companyName').value = logo.company_name || '';
+        document.getElementById('logoStatus').value = logo.status || 'active';
+        document.getElementById('logoFile').value = '';
+        document.getElementById('dropzoneText').textContent = 'Click to replace the current image';
+        currentPreviewDataUrl = logo.image_url;
+        const preview = document.getElementById('logoPreview');
+        preview.src = logo.image_url;
+        preview.classList.remove('d-none');
+        document.getElementById('logoPreviewEmpty').classList.add('d-none');
+        new bootstrap.Modal(document.getElementById('logoModal')).show();
+    }
+
+    function previewSelectedFile(file) {
+        if (!file) {
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = event => {
+            currentPreviewDataUrl = event.target.result;
+            const preview = document.getElementById('logoPreview');
+            preview.src = currentPreviewDataUrl;
+            preview.classList.remove('d-none');
+            document.getElementById('logoPreviewEmpty').classList.add('d-none');
+        };
+        reader.readAsDataURL(file);
+    }
+
+    async function toggleLogo(logoId) {
+        try {
+            const response = await fetch(`/api/admin/logos/${logoId}/toggle`, { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Failed to update logo status');
+            }
+            refreshLogos();
+            showAlert('success', 'Logo status updated');
+        } catch (error) {
+            showAlert('danger', error.message || 'Failed to update logo status');
+        }
+    }
+
+    async function deleteLogo(logoId) {
+        if (!confirm('Delete this logo?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/admin/logos/${logoId}`, { method: 'DELETE' });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Failed to delete logo');
+            }
+            refreshLogos();
+            showAlert('success', 'Logo deleted');
+        } catch (error) {
+            showAlert('danger', error.message || 'Failed to delete logo');
+        }
+    }
+
+    document.getElementById('searchInput').addEventListener('input', applySearch);
+    document.getElementById('logoFile').addEventListener('change', function() {
+        previewSelectedFile(this.files[0]);
+    });
+
+    document.getElementById('logoForm').addEventListener('submit', async function(event) {
+        event.preventDefault();
+
+        const logoId = document.getElementById('logoId').value;
+        const formData = new FormData();
+        formData.append('logo_name', document.getElementById('logoName').value.trim());
+        formData.append('company_name', document.getElementById('companyName').value.trim());
+        formData.append('status', document.getElementById('logoStatus').value);
+
+        const file = document.getElementById('logoFile').files[0];
+        if (file) {
+            formData.append('logo', file);
+        } else if (!logoId) {
+            showAlert('warning', 'Please select a logo image');
+            return;
+        }
+
+        try {
+            const response = await fetch(logoId ? `/api/admin/logos/${logoId}` : '/api/admin/logos', {
+                method: logoId ? 'PUT' : 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Failed to save logo');
+            }
+
+            bootstrap.Modal.getInstance(document.getElementById('logoModal')).hide();
+            refreshLogos();
+            showAlert('success', logoId ? 'Logo updated' : 'Logo uploaded');
+        } catch (error) {
+            showAlert('danger', error.message || 'Failed to save logo');
+        }
+    });
+
+    renderLogos(filteredLogos);
+</script>
+</body>
+</html>

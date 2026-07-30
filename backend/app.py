@@ -73,13 +73,13 @@ if __name__ == '__main__':
     init_db()
     
     print("\n📧 Application Routes:")
-    print("   - Login: http://localhost:5000/login")
-    print("   - Register: http://localhost:5000/register")
-    print("   - Admin Panel: http://localhost:5000/admin")
+    print("   - Login: http://localhost:5003/login")
+    print("   - Register: http://localhost:5003/register")
+    print("   - Admin Panel: http://localhost:5003/admin")
     print("\n🔑 Default Admin Credentials:")
     print("   Username: admin")
     print("   Password: admin123")
-    print("\n🌐 Open your browser and go to: http://localhost:5000")
+    print("\n🌐 Open your browser and go to: http://localhost:5003")
     print("="*60)
     
     app.run(debug=True, host='0.0.0.0', port=5003, use_reloader=False)

@@ -107,7 +107,7 @@ class EmailSender:
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
-    def create_email_message(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False):
+    def create_email_message(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False, logo_data=None):
         """Create MIME-safe email with plain or HTML body + optional attachments."""
 
         account = self.get_current_account()
@@ -135,24 +135,26 @@ class EmailSender:
             alternative_part = MIMEMultipart('alternative')
             plain_fallback = self._html_to_plain_text(body)
             alternative_part.attach(MIMEText(plain_fallback or body, 'plain', 'utf-8'))
-            alternative_part.attach(MIMEText(body, 'html', 'utf-8'))
+            if logo_data and logo_data.get('image_exists'):
+                related_part = MIMEMultipart('related')
+                related_part.attach(MIMEText(body, 'html', 'utf-8'))
+                try:
+                    with open(logo_data['image_path'], 'rb') as f:
+                        img = MIMEImage(f.read())
+                        content_id = logo_data.get('content_id', 'company-logo')
+                        img.add_header('Content-ID', f'<{content_id}>')
+                        img.add_header('Content-Disposition', 'inline', filename=logo_data.get('file_name', 'company_logo.jpeg'))
+                        related_part.attach(img)
+                        print("✅ Logo embedded inline")
+                except Exception as e:
+                    print("❌ Inline logo error:", e)
+                    related_part = MIMEText(body, 'html', 'utf-8')
+                alternative_part.attach(related_part)
+            else:
+                alternative_part.attach(MIMEText(body, 'html', 'utf-8'))
             msg.attach(alternative_part)
         else:
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
-
-        # ✅ Attach LOGO from folder
-        logo_path = os.path.join(os.getcwd(), "backend", "uploads", "logo", "company_logo.jpeg")
-        if os.path.exists(logo_path):
-            try:
-                with open(logo_path, 'rb') as f:
-                    img = MIMEImage(f.read())
-                    img.add_header('Content-Disposition', 'attachment', filename="company_logo.jpeg")
-                    msg.attach(img)
-                    print("✅ Logo attached")
-            except Exception as e:
-                print("❌ Logo attach error:", e)
-        else:
-            print("⚠️ Logo not found at:", logo_path)
 
         # ✅ Attach files
         import mimetypes
@@ -242,7 +244,7 @@ class EmailSender:
             self.server = None
             return False
     
-    def send_single_email(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False):
+    def send_single_email(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False, logo_data=None):
         """Send using pooled connection + validation"""
         import socket
         
@@ -262,7 +264,8 @@ class EmailSender:
                 from_name,
                 cc_emails,
                 attachments,
-                is_html
+                is_html,
+                logo_data=logo_data
             )
             if not msg:
                 return False
@@ -306,7 +309,7 @@ class EmailSender:
             socket.setdefaulttimeout(None)
 
     
-    def send_bulk_emails(self, recipients, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False, delay_between_emails=1, separate_threads=False):
+    def send_bulk_emails(self, recipients, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False, delay_between_emails=1, separate_threads=False, logo_data=None):
         """
         Send emails to multiple recipients with rotation
         
@@ -375,7 +378,8 @@ class EmailSender:
                 from_name,
                 cc_emails=cc_emails,
                 attachments=attachments,
-                is_html=is_html
+                is_html=is_html,
+                logo_data=logo_data
             )
             
             if success:

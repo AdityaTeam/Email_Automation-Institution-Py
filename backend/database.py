@@ -6,6 +6,7 @@ Handles connection to MongoDB and database operations
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -68,6 +69,7 @@ class Collections:
     EMAIL_LOGS = 'email_logs'
     CC_EMAILS = 'cc_emails' # FEATURE 3
     CC_EMAILS = 'cc_emails'  # FEATURE 3: Global CC emails collection
+    LOGOS = 'logos'
 
 
 # Initialize database with default data
@@ -83,6 +85,8 @@ def init_db():
     db[Collections.EXCEL_FILES].create_index('user_id')
     db[Collections.EMAIL_LOGS].create_index('user_id')
     db[Collections.EMAIL_LOGS].create_index('sent_at')
+    db[Collections.LOGOS].create_index('status')
+    db[Collections.LOGOS].create_index('created_at')
     
     # Check if admin exists
     admin = db[Collections.USERS].find_one({'role': 'admin'})
@@ -208,6 +212,24 @@ Best regards,
         if default_templates:
             db[Collections.TEMPLATES].insert_many(default_templates)
             print("✅ Default templates created")
+
+    # Seed the legacy logo as a managed record when available.
+    if db[Collections.LOGOS].count_documents({}) == 0:
+        legacy_logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'logo', 'company_logo.jpeg')
+        if os.path.exists(legacy_logo_path):
+            db[Collections.LOGOS].insert_one({
+                'logo_name': 'Default Company Logo',
+                'company_name': 'Hansraj Ventures',
+                'file_name': 'company_logo.jpeg',
+                'original_filename': 'company_logo.jpeg',
+                'status': 'active',
+                'is_active': True,
+                'is_system_default': True,
+                'uploaded_by': 'system',
+                'created_at': datetime.utcnow(),
+                'updated_at': datetime.utcnow()
+            })
+            print('✅ Default logo record created')
     
     print("✅ Database initialized successfully")
     return True

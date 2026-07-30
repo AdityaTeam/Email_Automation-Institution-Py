@@ -7,6 +7,7 @@ SIMPLIFIED VERSION - No encryption, plain text passwords
 from datetime import datetime
 from datetime import datetime
 from bson import ObjectId
+import os
 from database import MongoDB, Collections
 
 
@@ -109,6 +110,30 @@ class User:
         if db is None:
             return None
         return db[Collections.USERS].find_one({'_id': ObjectId(user_id)})
+
+    @staticmethod
+    def get_default_logo_id(user_id):
+        """Get the stored default logo for a user."""
+        db = MongoDB.get_db()
+        if db is None:
+            return None
+        user = db[Collections.USERS].find_one({'_id': ObjectId(user_id)})
+        if not user:
+            return None
+        return user.get('default_logo_id')
+
+    @staticmethod
+    def set_default_logo(user_id, logo_id=None):
+        """Persist a user's default logo selection."""
+        db = MongoDB.get_db()
+        if db is None:
+            return False
+
+        result = db[Collections.USERS].update_one(
+            {'_id': ObjectId(user_id)},
+            {'$set': {'default_logo_id': logo_id}}
+        )
+        return result.modified_count > 0
 
 
 class EmailID:
@@ -464,7 +489,7 @@ Best Regards,
         return result.deleted_count > 0
     
     @staticmethod
-    def build_signature(signature_data):
+    def build_signature(signature_data, logo_data=None, is_html=False):
         """Build signature from user-provided data"""
         signature = Template.DEFAULT_SIGNATURE_FORMAT
         signature = signature.replace('{{executive_name}}', signature_data.get('executive_name', ''))
@@ -473,6 +498,14 @@ Best Regards,
         signature = signature.replace('{{company_email}}', signature_data.get('company_email', ''))
         signature = signature.replace('{{company_phone}}', signature_data.get('company_phone', ''))
         signature = signature.replace('{{company_website}}', signature_data.get('company_website', ''))
+
+        if is_html:
+            signature = signature.replace('\n', '<br>')
+            if logo_data and logo_data.get('image_exists'):
+                content_id = logo_data.get('content_id', 'company-logo')
+                alt_text = logo_data.get('logo_name') or logo_data.get('company_name') or 'Company Logo'
+                signature += f'<br><br><img src="cid:{content_id}" alt="{alt_text}" style="max-width:180px;height:auto;display:block;">'
+
         return signature
     
     @staticmethod
@@ -537,6 +570,164 @@ class CcEmail:
             return False
         result = db[Collections.CC_EMAILS].delete_one({'_id': ObjectId(cc_id)})
         return result.deleted_count > 0
+
+
+class CompanyLogo:
+    """Company logo model and helper functions"""
+
+    @staticmethod
+    def _backend_logo_dir():
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'logo')
+
+    @staticmethod
+    def _logo_file_path(file_name):
+        return os.path.join(CompanyLogo._backend_logo_dir(), file_name)
+
+    @staticmethod
+    def _normalize_logo(doc):
+        if not doc:
+            return None
+
+        normalized = dict(doc)
+        normalized['_id'] = str(normalized['_id'])
+        if normalized.get('created_at') and hasattr(normalized['created_at'], 'isoformat'):
+            normalized['created_at'] = normalized['created_at'].isoformat()
+        if normalized.get('updated_at') and hasattr(normalized['updated_at'], 'isoformat'):
+            normalized['updated_at'] = normalized['updated_at'].isoformat()
+        normalized['image_path'] = CompanyLogo._logo_file_path(normalized.get('file_name', ''))
+        normalized['image_exists'] = os.path.exists(normalized['image_path'])
+        normalized['status'] = normalized.get('status', 'inactive')
+        normalized['is_active'] = normalized.get('status') == 'active' or normalized.get('is_active', False)
+        normalized['image_url'] = f"/api/logos/{normalized['_id']}/image"
+        return normalized
+
+    @staticmethod
+    def get_all(include_inactive=True):
+        db = MongoDB.get_db()
+        if db is None:
+            return []
+
+        query = {} if include_inactive else {'status': 'active'}
+        logos = list(db[Collections.LOGOS].find(query).sort('created_at', -1))
+        return [CompanyLogo._normalize_logo(logo) for logo in logos]
+
+    @staticmethod
+    def get_active():
+        return CompanyLogo.get_all(include_inactive=False)
+
+    @staticmethod
+    def get_by_id(logo_id):
+        db = MongoDB.get_db()
+        if db is None:
+            return None
+        logo = db[Collections.LOGOS].find_one({'_id': ObjectId(logo_id)})
+        return CompanyLogo._normalize_logo(logo)
+
+    @staticmethod
+    def create(logo_data):
+        db = MongoDB.get_db()
+        if db is None:
+            return None
+
+        payload = {
+            'logo_name': logo_data.get('logo_name', '').strip(),
+            'company_name': logo_data.get('company_name', '').strip(),
+            'file_name': logo_data.get('file_name', '').strip(),
+            'original_filename': logo_data.get('original_filename', '').strip(),
+            'status': logo_data.get('status', 'active'),
+            'is_active': logo_data.get('status', 'active') == 'active',
+            'uploaded_by': logo_data.get('uploaded_by'),
+            'is_system_default': logo_data.get('is_system_default', False),
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        }
+        result = db[Collections.LOGOS].insert_one(payload)
+        payload['_id'] = result.inserted_id
+        return CompanyLogo._normalize_logo(payload)
+
+    @staticmethod
+    def update(logo_id, logo_data):
+        db = MongoDB.get_db()
+        if db is None:
+            return False
+
+        update_data = {
+            'logo_name': logo_data.get('logo_name', '').strip(),
+            'company_name': logo_data.get('company_name', '').strip(),
+            'status': logo_data.get('status', 'active'),
+            'is_active': logo_data.get('status', 'active') == 'active',
+            'updated_at': datetime.utcnow()
+        }
+
+        if logo_data.get('file_name'):
+            update_data['file_name'] = logo_data['file_name']
+        if logo_data.get('original_filename'):
+            update_data['original_filename'] = logo_data['original_filename']
+
+        result = db[Collections.LOGOS].update_one(
+            {'_id': ObjectId(logo_id)},
+            {'$set': update_data}
+        )
+        return result.modified_count > 0
+
+    @staticmethod
+    def delete(logo_id):
+        db = MongoDB.get_db()
+        if db is None:
+            return False
+        result = db[Collections.LOGOS].delete_one({'_id': ObjectId(logo_id)})
+        return result.deleted_count > 0
+
+    @staticmethod
+    def set_status(logo_id, status):
+        db = MongoDB.get_db()
+        if db is None:
+            return False
+        result = db[Collections.LOGOS].update_one(
+            {'_id': ObjectId(logo_id)},
+            {'$set': {'status': status, 'is_active': status == 'active', 'updated_at': datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+
+    @staticmethod
+    def resolve(logo_id=None, user_id=None):
+        """Resolve the best available logo for a user/send operation."""
+        candidate = None
+        if logo_id:
+            candidate = CompanyLogo.get_by_id(logo_id)
+            if candidate and candidate.get('status') != 'active' and candidate.get('_id') != 'legacy-default':
+                candidate = None
+
+        if not candidate and user_id:
+            default_logo_id = User.get_default_logo_id(user_id)
+            if default_logo_id:
+                candidate = CompanyLogo.get_by_id(default_logo_id)
+                if candidate and candidate.get('status') != 'active' and candidate.get('_id') != 'legacy-default':
+                    candidate = None
+
+        if not candidate:
+            active_logos = CompanyLogo.get_active()
+            candidate = active_logos[0] if active_logos else None
+
+        if candidate and candidate.get('image_exists'):
+            return candidate
+
+        legacy_path = CompanyLogo._logo_file_path('company_logo.jpeg')
+        if os.path.exists(legacy_path):
+            return {
+                '_id': 'legacy-default',
+                'logo_name': 'Default Company Logo',
+                'company_name': 'Hansraj Ventures',
+                'file_name': 'company_logo.jpeg',
+                'original_filename': 'company_logo.jpeg',
+                'status': 'active',
+                'is_active': True,
+                'image_path': legacy_path,
+                'image_exists': True,
+                'image_url': '/api/logos/legacy-default/image'
+            }
+
+        return candidate
 
 class EmailLog:
     """Email Log model and helper functions"""

@@ -3,9 +3,9 @@ User Panel Routes - Backup
 Handles user dashboard, email management, and email sending
 """
 
-from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, send_from_directory
 from regex import template
-from models import EmailID, ExcelFile, Template, Requirement, EmailLog
+from models import EmailID, ExcelFile, Template, Requirement, EmailLog, CompanyLogo, User
 from database import MongoDB, Collections
 from bson import ObjectId
 import os
@@ -14,6 +14,8 @@ from werkzeug.utils import secure_filename
 from email_sender import EmailSender
 
 user_bp = Blueprint('user', __name__)
+LOGO_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'logo')
+LOGO_UPLOAD_DIR = os.path.abspath(LOGO_UPLOAD_DIR)
 
 # SMTP Configuration Auto-Detection
 SMTP_CONFIG = {
@@ -259,12 +261,78 @@ def compose():
     email_ids = EmailID.get_by_user(user_id)
     excel_files = ExcelFile.get_by_user(user_id)
     requirements = Requirement.get_all()
+    logos = CompanyLogo.get_active()
+    selected_logo_id = User.get_default_logo_id(user_id)
     
     return render_template('user/compose.html',
                            username=session['username'],
                            email_ids=email_ids,
                            excel_files=excel_files,
-                           requirements=requirements)
+                           requirements=requirements,
+                           logos=logos,
+                           selected_logo_id=selected_logo_id)
+
+
+@user_bp.route('/logos')
+@require_login
+def logos():
+    """Read-only logo gallery for users"""
+    logos = CompanyLogo.get_active()
+    selected_logo_id = User.get_default_logo_id(session['user_id'])
+    return render_template('user/logos.html',
+                           username=session['username'],
+                           logos=logos,
+                           selected_logo_id=selected_logo_id)
+
+
+@user_bp.route('/api/logos', methods=['GET'])
+@require_login
+def get_logos():
+    """Get active logos for users"""
+    logos = CompanyLogo.get_active()
+    default_logo_id = User.get_default_logo_id(session['user_id'])
+    return jsonify({
+        'logos': logos,
+        'default_logo_id': default_logo_id
+    })
+
+
+@user_bp.route('/api/logos/<logo_id>/image', methods=['GET'])
+@require_login
+def get_logo_image(logo_id):
+    """Serve a logo image for preview cards and compose selection."""
+    if logo_id == 'legacy-default':
+        legacy_file = os.path.join(LOGO_UPLOAD_DIR, 'company_logo.jpeg')
+        if os.path.exists(legacy_file):
+            return send_from_directory(LOGO_UPLOAD_DIR, 'company_logo.jpeg')
+        return jsonify({'error': 'Logo not found'}), 404
+
+    logo = CompanyLogo.get_by_id(logo_id)
+    if not logo or not logo.get('image_exists'):
+        return jsonify({'error': 'Logo not found'}), 404
+
+    return send_from_directory(LOGO_UPLOAD_DIR, logo['file_name'])
+
+
+@user_bp.route('/api/user/default-logo', methods=['POST'])
+@require_login
+def set_default_logo():
+    """Persist the user's preferred logo."""
+    data = request.json or {}
+    logo_id = data.get('logo_id')
+
+    if logo_id in (None, '', 'null'):
+        if User.set_default_logo(session['user_id'], None):
+            return jsonify({'success': True})
+        return jsonify({'error': 'Failed to update default logo'}), 400
+
+    logo = CompanyLogo.get_by_id(logo_id)
+    if not logo or not logo.get('image_exists') or logo.get('status') != 'active':
+        return jsonify({'error': 'Selected logo is not available'}), 400
+
+    if User.set_default_logo(session['user_id'], logo_id):
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to update default logo'}), 400
 
 
 @user_bp.route('/api/templates', methods=['GET'])
@@ -323,6 +391,7 @@ def send_emails():
     subject = data.get('subject', '')
     body = data.get('body', '')
     template_id = data.get('template_id')
+    logo_id = data.get('logo_id')
     attachments = []
     is_html = data.get('is_html', False)
     separate_threads = data.get('separate_threads', True)
@@ -361,7 +430,13 @@ def send_emails():
     if not recipients or not sender_email_id or not subject or not body:
         return jsonify({'error': 'All fields required'}), 400
     
-    signature = Template.build_signature(signature_data)
+    logo_data = CompanyLogo.resolve(logo_id=logo_id, user_id=session['user_id'])
+    if logo_data:
+        logo_data['content_id'] = 'company-logo'
+
+    effective_is_html = is_html or bool(logo_data and logo_data.get('image_exists'))
+
+    signature = Template.build_signature(signature_data, logo_data=logo_data, is_html=effective_is_html)
     user_email_ids = EmailID.get_by_user_with_passwords(session['user_id'])
     
     # Build email accounts list with their current sent counts from database
@@ -389,7 +464,7 @@ def send_emails():
             start_index = i
             break
     
-    if is_html:
+    if effective_is_html:
         body = Template.process_body(body)
         signature = Template.process_body(signature)
     
@@ -417,9 +492,10 @@ def send_emails():
             from_name,
             cc_emails=cc_emails,
             attachments=attachments,
-            is_html=is_html,
+            is_html=effective_is_html,
             delay_between_emails=5,
-            separate_threads=separate_threads
+            separate_threads=separate_threads,
+            logo_data=logo_data
         )
         
         sent_entries = result.get("sent_entries", [])

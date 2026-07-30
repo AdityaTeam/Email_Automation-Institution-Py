@@ -3,14 +3,17 @@ Admin Panel Routes
 Handles admin dashboard, user management, and system control
 """
 
-from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
-from models import User, EmailID, ExcelFile, Template, Requirement, EmailLog
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, send_from_directory
+from models import User, EmailID, ExcelFile, Template, Requirement, EmailLog, CompanyLogo
 from database import MongoDB, Collections
 from bson import ObjectId
+from datetime import datetime
 import os
 from werkzeug.utils import secure_filename
 
 admin_bp = Blueprint('admin', __name__)
+LOGO_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads', 'logo')
+LOGO_UPLOAD_DIR = os.path.abspath(LOGO_UPLOAD_DIR)
 
 
 def require_admin(f):
@@ -516,6 +519,161 @@ def delete_cc_email(cc_id):
 def cc_management():
     """CC Emails and Logo management page"""
     return render_template('admin/cc.html', username=session['username'])
+
+
+@admin_bp.route('/admin/logos')
+@require_admin
+def logo_management():
+    """Admin logo management page"""
+    logos = CompanyLogo.get_all()
+    return render_template('admin/logos.html', username=session['username'], logos=logos)
+
+
+@admin_bp.route('/api/admin/logos', methods=['GET'])
+@require_admin
+def get_logos():
+    """Get all managed logos for admin"""
+    logos = CompanyLogo.get_all()
+    return jsonify({'logos': logos})
+
+
+@admin_bp.route('/api/admin/logos', methods=['POST'])
+@require_admin
+def add_logo():
+    """Upload a new company logo"""
+    if 'logo' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    file = request.files['logo']
+    if not file or file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    logo_name = request.form.get('logo_name', '').strip()
+    company_name = request.form.get('company_name', '').strip()
+    status = request.form.get('status', 'active').strip().lower()
+
+    if not logo_name or not company_name:
+        return jsonify({'error': 'Logo name and company name are required'}), 400
+
+    filename = secure_filename(file.filename)
+    if not filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+        return jsonify({'error': 'Only image files are allowed'}), 400
+
+    os.makedirs(LOGO_UPLOAD_DIR, exist_ok=True)
+    stored_filename = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}_{filename}"
+    file_path = os.path.join(LOGO_UPLOAD_DIR, stored_filename)
+    file.save(file_path)
+
+    logo = CompanyLogo.create({
+        'logo_name': logo_name,
+        'company_name': company_name,
+        'file_name': stored_filename,
+        'original_filename': filename,
+        'status': 'active' if status != 'inactive' else 'inactive',
+        'uploaded_by': session.get('user_id')
+    })
+
+    return jsonify({'success': True, 'logo': logo})
+
+
+@admin_bp.route('/api/admin/logos/<logo_id>', methods=['PUT'])
+@require_admin
+def update_logo(logo_id):
+    """Edit logo details or replace the image"""
+    logo = CompanyLogo.get_by_id(logo_id)
+    if not logo:
+        return jsonify({'error': 'Logo not found'}), 404
+
+    logo_name = request.form.get('logo_name', logo.get('logo_name', '')).strip()
+    company_name = request.form.get('company_name', logo.get('company_name', '')).strip()
+    status = request.form.get('status', logo.get('status', 'active')).strip().lower()
+    file = request.files.get('logo')
+
+    if not logo_name or not company_name:
+        return jsonify({'error': 'Logo name and company name are required'}), 400
+
+    update_data = {
+        'logo_name': logo_name,
+        'company_name': company_name,
+        'status': 'active' if status != 'inactive' else 'inactive'
+    }
+
+    if file and file.filename:
+        filename = secure_filename(file.filename)
+        if not filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+            return jsonify({'error': 'Only image files are allowed'}), 400
+
+        os.makedirs(LOGO_UPLOAD_DIR, exist_ok=True)
+        stored_filename = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}_{filename}"
+        file_path = os.path.join(LOGO_UPLOAD_DIR, stored_filename)
+        file.save(file_path)
+
+        old_path = logo.get('image_path')
+        if old_path and os.path.exists(old_path) and not logo.get('is_system_default'):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+
+        update_data['file_name'] = stored_filename
+        update_data['original_filename'] = filename
+
+    if CompanyLogo.update(logo_id, update_data):
+        return jsonify({'success': True, 'logo': CompanyLogo.get_by_id(logo_id)})
+
+    return jsonify({'error': 'Failed to update logo'}), 400
+
+
+@admin_bp.route('/api/admin/logos/<logo_id>/toggle', methods=['POST'])
+@require_admin
+def toggle_logo_status(logo_id):
+    """Enable or disable a logo"""
+    logo = CompanyLogo.get_by_id(logo_id)
+    if not logo:
+        return jsonify({'error': 'Logo not found'}), 404
+
+    new_status = 'inactive' if logo.get('status') == 'active' else 'active'
+    if CompanyLogo.set_status(logo_id, new_status):
+        return jsonify({'success': True, 'logo': CompanyLogo.get_by_id(logo_id)})
+
+    return jsonify({'error': 'Failed to update logo status'}), 400
+
+
+@admin_bp.route('/api/admin/logos/<logo_id>', methods=['DELETE'])
+@require_admin
+def delete_logo(logo_id):
+    """Delete a logo"""
+    logo = CompanyLogo.get_by_id(logo_id)
+    if not logo:
+        return jsonify({'error': 'Logo not found'}), 404
+
+    if CompanyLogo.delete(logo_id):
+        image_path = logo.get('image_path')
+        if image_path and os.path.exists(image_path) and not logo.get('is_system_default'):
+            try:
+                os.remove(image_path)
+            except OSError:
+                pass
+        return jsonify({'success': True})
+
+    return jsonify({'error': 'Failed to delete logo'}), 400
+
+
+@admin_bp.route('/api/admin/logos/<logo_id>/image')
+@require_admin
+def get_logo_image(logo_id):
+    """Serve logo image for previews"""
+    if logo_id == 'legacy-default':
+        legacy_file = os.path.join(LOGO_UPLOAD_DIR, 'company_logo.jpeg')
+        if os.path.exists(legacy_file):
+            return send_from_directory(LOGO_UPLOAD_DIR, 'company_logo.jpeg')
+        return jsonify({'error': 'Logo not found'}), 404
+
+    logo = CompanyLogo.get_by_id(logo_id)
+    if not logo or not logo.get('image_exists'):
+        return jsonify({'error': 'Logo not found'}), 404
+
+    return send_from_directory(LOGO_UPLOAD_DIR, logo['file_name'])
 
 
 # @admin_bp.route('/api/admin/logo', methods=['GET'])
