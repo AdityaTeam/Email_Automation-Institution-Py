@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Bulk Email Sender</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        :root {
+            --primary-color: #4a90d9;
+            --secondary-color: #6c757d;
+            --success-color: #28a745;
+            --danger-color: #dc3545;
+            --warning-color: #ffc107;
+            --info-color: #17a2b8;
+        }
+        
+        body {
+            background: #f5f7fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .sidebar {
+            min-height: 100vh;
+            background: white;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .sidebar .nav-link {
+            color: #333;
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin: 5px 10px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar .nav-link:hover,
+        .sidebar .nav-link.active {
+            background: var(--primary-color);
+            color: white;
+        }
+        
+        .sidebar .nav-link i {
+            margin-right: 10px;
+        }
+        
+        .main-content {
+            padding: 30px;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+            margin-bottom: 20px;
+        }
+        
+        .card-header {
+            background: white;
+            border-bottom: 2px solid #f0f0f0;
+            padding: 15px 20px;
+            font-weight: 600;
+        }
+        
+        .card-header i {
+            margin-right: 10px;
+            color: var(--primary-color);
+        }
+        
+        .form-label {
+            font-weight: 500;
+            color: #444;
+            margin-bottom: 8px;
+        }
+        
+        .form-control, .form-select {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px 15px;
+            transition: all 0.3s;
+        }
+        
+        .form-control:focus, .form-select:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.1);
+        }
+        
+        .btn-primary {
+            background: var(--primary-color);
+            border: none;
+            padding: 10px 25px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+        
+        .btn-primary:hover {
+            background: #357abd;
+        }
+        
+        .btn-success {
+            background: var(--success-color);
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        
+        .btn-success:hover {
+            background: #218838;
+        }
+        
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #fafafa;
+        }
+        
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--primary-color);
+            background: #f0f7ff;
+        }
+        
+        .upload-area i {
+            font-size: 3rem;
+            color: var(--primary-color);
+            margin-bottom: 15px;
+        }
+        
+        .recipient-table {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .recipient-table table {
+            font-size: 0.9rem;
+        }
+        
+        .recipient-table th {
+            position: sticky;
+            top: 0;
+            background: #f5f7fa;
+            z-index: 1;
+        }
+        
+        .badge-sent {
+            background: var(--success-color);
+        }
+        
+        .badge-failed {
+            background: var(--danger-color);
+        }
+        
+        .badge-pending {
+            background: var(--warning-color);
+            color: #333;
+        }
+        
+        .progress-container {
+            display: none;
+        }
+        
+        .progress-container.active {
+            display: block;
+        }
+        
+        .stats-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+        }
+        
+        .stats-card i {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        
+        .stats-card .number {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #333;
+        }
+        
+        .stats-card .label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .user-info {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 10px;
+        }
+        
+        .preview-modal .modal-body {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            display: none;
+        }
+        
+        .loading-overlay.active {
+            display: flex;
+        }
+        
+        .spinner-border {
+            width: 3rem;
+            height: 3rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="text-center">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-3">Sending emails...</p>
+        </div>
+    </div>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-2 sidebar">
+                <div class="user-info">
+                    <i class="fas fa-user-circle me-2"></i>
+                    <strong>{{ username }}</strong>
+                </div>
+                <nav class="nav flex-column">
+                    <a class="nav-link active" href="#">
+                        <i class="fas fa-envelope"></i> Compose
+                    </a>
+                    <a class="nav-link" href="/logout">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </a>
+                </nav>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-10 main-content">
+                <h2 class="mb-4">
+                    <i class="fas fa-paper-plane text-primary"></i> Bulk Email Sender
+                </h2>
+                
+                <div class="row">
+                    <!-- Left Column - Email Composition -->
+                    <div class="col-lg-7">
+                        <!-- Template Selection -->
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-file-alt"></i> Select Template
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Email Template</label>
+                                        <select class="form-select" id="templateSelect">
+                                            <option value="">-- Select Template --</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Sender Email</label>
+                                        <select class="form-select" id="senderSelect">
+                                            <option value="">-- Select Sender --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Email Content -->
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-edit"></i> Email Content
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label class="form-label">Subject</label>
+                                    <input type="text" class="form-control" id="emailSubject" 
+                                           placeholder="Enter email subject">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Email Body</label>
+                                    <div class="mb-2">
+                                        <small class="text-muted">
+                                            Use <code>{{name}}</code> for recipient name and 
+                                            <code>{{institute}}</code> for institute name
+                                        </small>
+                                    </div>
+                                    <textarea class="form-control" id="emailBody" rows="12" 
+                                              placeholder="Enter email body"></textarea>
+                                </div>
+                                <div class="mb-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="htmlFormat">
+                                        <label class="form-check-label" for="htmlFormat">
+                                            Send as HTML
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-primary" id="previewBtn">
+                                        <i class="fas fa-eye me-2"></i>Preview
+                                    </button>
+                                    <button class="btn btn-success" id="sendBtn">
+                                        <i class="fas fa-paper-plane me-2"></i>Send Emails
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Right Column - Recipients -->
+                    <div class="col-lg-5">
+                        <!-- File Upload -->
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-upload"></i> Upload Recipients
+                            </div>
+                            <div class="card-body">
+                                <div class="upload-area" id="uploadArea">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <h5>Drop Excel/CSV file here</h5>
+                                    <p class="text-muted mb-0">or click to browse</p>
+                                    <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" hidden>
+                                </div>
+                                <div class="mt-3">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> 
+                                        File should contain columns: Email, Name (optional), Institute (optional)
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Recipients List -->
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-users"></i> Recipients</span>
+                                <span class="badge bg-primary" id="recipientCount">0</span>
+                            </div>
+                            <div class="card-body recipient-table" id="recipientTableContainer">
+                                <p class="text-muted text-center py-4" id="noRecipients">
+                                    <i class="fas fa-inbox fa-2x"></i>
+                                    <br>No recipients uploaded yet
+                                </p>
+                                <table class="table table-striped" id="recipientTable" style="display: none;">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Email</th>
+                                            <th>Name</th>
+                                            <th>Institute</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="recipientTableBody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <!-- Progress -->
+                        <div class="card progress-container" id="progressCard">
+                            <div class="card-header">
+                                <i class="fas fa-chart-line"></i> Sending Progress
+                            </div>
+                            <div class="card-body">
+                                <div class="progress mb-3" style="height: 25px;">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                         role="progressbar" id="progressBar" style="width: 0%">
+                                        0%
+                                    </div>
+                                </div>
+                                <div class="row text-center">
+                                    <div class="col-4">
+                                        <div class="stats-card">
+                                            <i class="fas fa-check text-success"></i>
+                                            <div class="number" id="sentCount">0</div>
+                                            <div class="label">Sent</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="stats-card">
+                                            <i class="fas fa-times text-danger"></i>
+                                            <div class="number" id="failedCount">0</div>
+                                            <div class="label">Failed</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="stats-card">
+                                            <i class="fas fa-envelope text-primary"></i>
+                                            <div class="number" id="totalCount">0</div>
+                                            <div class="label">Total</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div class="modal fade preview-modal" id="previewModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Email Preview</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <strong>Subject:</strong> <span id="previewSubject"></span>
+                    </div>
+                    <hr>
+                    <div id="previewBody" style="white-space: pre-wrap;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Result Modal -->
+    <div class="modal fade" id="resultModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Sending Complete</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center py-4">
+                    <i class="fas fa-check-circle text-success" style="font-size: 4rem;"></i>
+                    <h4 class="mt-3">Emails Sent Successfully!</h4>
+                    <p class="text-muted" id="resultMessage"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

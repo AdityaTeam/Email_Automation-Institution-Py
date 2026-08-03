@@ -1,0 +1,60 @@
+<div class="sidebar">
+
+    <div class="sidebar-user">
+        <i class="fas fa-user-shield"></i>
+        <strong>{{ username }}</strong>
+        <span class="admin-badge">Admin</span>
+    </div>
+
+    <nav class="nav flex-column">
+
+        <a href="/admin"
+           class="nav-link {% if request.path == '/admin' %}active{% endif %}">
+            <i class="fas fa-home"></i>
+            <span>Dashboard</span>
+        </a>
+
+        <a href="/admin/users"
+           class="nav-link {% if '/admin/users' in request.path %}active{% endif %}">
+            <i class="fas fa-users"></i>
+            <span>Users</span>
+        </a>
+
+        <a href="/admin/templates"
+           class="nav-link {% if '/admin/templates' in request.path %}active{% endif %}">
+            <i class="fas fa-file-alt"></i>
+            <span>Templates</span>
+        </a>
+
+        <a href="/admin/cc"
+           class="nav-link {% if '/admin/cc' in request.path %}active{% endif %}">
+            <i class="fas fa-copy"></i>
+            <span>CC Emails</span>
+        </a>
+
+        <a href="/admin/data-repository"
+           class="nav-link {% if '/admin/data-repository' in request.path %}active{% endif %}">
+            <i class="fas fa-database"></i>
+            <span>Data Repository</span>
+        </a>
+
+        <a href="/admin/categories"
+           class="nav-link {% if '/admin/categories' in request.path %}active{% endif %}">
+            <i class="fas fa-folder-open"></i>
+            <span>Categories</span>
+        </a>
+
+        <a href="/admin/logs"
+           class="nav-link {% if '/admin/logs' in request.path %}active{% endif %}">
+            <i class="fas fa-history"></i>
+            <span>Logs</span>
+        </a>
+
+        <a href="/logout" class="nav-link">
+            <i class="fas fa-sign-out-alt"></i>
+            <span>Logout</span>
+        </a>
+
+    </nav>
+
+</div>

@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CC Emails & Logo - Admin Panel</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --primary-color: #4a90d9; --success-color: #28a745; --danger-color: #dc3545; }
+        body { background: #f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana }
+        .sidebar { min-height: 100vh; background: white; box-shadow: 2px 0 10px rgba(0,0,0,0.1); }
+        .sidebar .nav-link { color: #333; padding: 12px 20px; border-radius: 8px; margin: 5px 10px; transition: all 0.3s; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background: var(--primary-color); color: white; }
+        .sidebar .nav-link i { margin-right: 10px; }
+        .main-content { padding: 30px; }
+        .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); margin-bottom: 20px; }
+        .card-header { background: white; border-bottom: 2px solid #f0f0f0; padding: 15px 20px; font-weight: 600; }
+        .card-header i { margin-right: 10px; color: var(--primary-color); }
+        .logo-preview { max-width: 200px; max-height: 100px; border: 2px solid #dee2e6; border-radius: 8px; }
+        .upload-area { border: 2px dashed #ccc; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; background: #fafafa; }
+        .upload-area:hover, .upload-area.dragover { border-color: var(--primary-color); background: #f0f7ff; }
+        .user-info { padding: 15px 20px; border-bottom: 1px solid #eee; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-2 sidebar">
+                <div class="user-info">
+                    <i class="fas fa-user-shield me-2 text-danger"></i>
+                    <strong>{{ username }}</strong>
+                    <span class="badge bg-danger ms-2">Admin</span>
+                </div>
+                <nav class="nav flex-column">
+                    <a class="nav-link" href="/admin"><i class="fas fa-home"></i> Dashboard</a>
+                    <a class="nav-link" href="/admin/users"><i class="fas fa-users"></i> Users</a>
+                    <a class="nav-link" href="/admin/templates"><i class="fas fa-file-alt"></i> Templates</a>
+                    <a class="nav-link active" href="/admin/cc"><i class="fas fa-copy"></i> CC Emails</a>
+                    <a class="nav-link" href="/admin/logs"><i class="fas fa-history"></i> Logs</a>
+                    <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                </nav>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-10 main-content">
+                <h2 class="mb-4"><i class="fas fa-copy text-primary"></i> CC Emails Management</h2>
+                
+                <!-- Add CC Email -->
+                <div class="card mb-4">
+                    <div class="card-header"><i class="fas fa-plus"></i> Add New CC Email</div>
+                    <div class="card-body">
+                        <div class="input-group">
+                            <input type="email" id="newCcEmail" class="form-control" placeholder="cc@example.com">
+                            <button class="btn btn-success" onclick="addCcEmail()">
+                                <i class="fas fa-plus"></i> Add
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- CC Emails Table -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between">
+                        <span><i class="fas fa-list"></i> CC Emails List</span>
+                        <span class="badge bg-primary" id="ccCount">0</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="ccTable">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Email</th>
+                                        <th>Added</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ccTableBody">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Company Logo Management -->
+                <div class="card">
+                    <div class="card-header"><i class="fas fa-image"></i> Company Logo (Email Signature)</div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="upload-area" onclick="document.getElementById('logoFile').click()">
+                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                    <p class="mb-1"><strong>Upload Logo</strong></p>
+                                    <small class="text-muted">PNG/JPG (max 200x100px recommended)</small>
+                                    <input type="file" id="logoFile" accept="image/*" style="display: none;" onchange="uploadLogo()">
+                                </div>
+                            </div>
+                            <div class="col-md-8">
+                                <div id="logoPreview">
+                                    <div class="text-center py-4">
+                                        <i class="fas fa-image fa-4x text-muted"></i>
+                                        <p class="text-muted mt-2">No logo uploaded</p>
+                                        <small>Logo will appear in email signature footer</small>
+                                    </div>
+                                </div>
+                                <div id="logoStatus" class="mt-2"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit CC Modal -->
+    <div class="modal fade" id="editCcModal">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit CC Email</h5>
+                    <button class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="editCcId">
+                    <div class="mb-3">
+                        <label class="form-label">Email Address</label>
+                        <input type="email" id="editCcEmail" class="form-control">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveCcEmail()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Container -->
+    <div id="alertContainer" style="position: fixed; top: 20px; right: 20px; z-index: 9999;"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let ccEmails = [];
+        
+        // Load CC emails and logo
+        async function loadData() {
+            await loadCcEmails();
+            // await loadLogo();
+        }
+        
+        async function loadCcEmails() {
+    try {
+        const response = await fetch('/api/admin/cc-emails');
+        const data = await response.json();
+
+        if (!data || !data.cc_emails) {
+            console.error("Invalid API response:", data);
+            return;
+        }
+
+        ccEmails = data.cc_emails;
+        updateCcTable();
+        document.getElementById('ccCount').textContent = ccEmails.length;
+
+    } catch (error) {
+        console.error('Error loading CC emails:', error);
+    }
+}
+        
+        function updateCcTable() {
+    const tbody = document.getElementById('ccTableBody');
+    tbody.innerHTML = '';
+
+    if (!ccEmails || ccEmails.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center">No CC emails found</td></tr>`;
+        return;
+    }
+
+    ccEmails.forEach((cc, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${index + 1}</td>
+            <td>${cc.email || '-'}</td>
+            <td>${cc.created_at ? new Date(cc.created_at).toLocaleDateString() : '-'}</td>
+            <td>
+                <button class="btn btn-sm btn-warning me-1" onclick="editCcEmail('${cc._id}', '${cc.email}')">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button class="btn btn-sm btn-danger" onclick="deleteCcEmail('${cc._id}')">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+        
+        async function addCcEmail() {
+            const email = document.getElementById('newCcEmail').value.trim();
+            if (!email || !email.includes('@')) {
+                showAlert('warning', 'Please enter a valid email address');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/admin/cc-emails', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('newCcEmail').value = '';
+                    loadCcEmails();
+                    showAlert('success', 'CC email added successfully');
+                } else {
+                    showAlert('danger', data.error || 'Failed to add');
+                }
+            } catch (error) {
+                showAlert('danger', 'Error adding CC email');
+            }
+        }
+        
+        function editCcEmail(id, email) {
+            document.getElementById('editCcId').value = id;
+            document.getElementById('editCcEmail').value = email;
+            new bootstrap.Modal(document.getElementById('editCcModal')).show();
+        }
+        
+        async function saveCcEmail() {
+            const id = document.getElementById('editCcId').value;
+            const email = document.getElementById('editCcEmail').value.trim();
+            
+            if (!email || !email.includes('@')) {
+                showAlert('warning', 'Please enter a valid email');
+                return;
+            }
+            
+            // Note: No direct PUT endpoint, so DELETE + ADD
+            try {
+                await fetch(`/api/admin/cc-emails/${id}`, { method: 'DELETE' });
+                await fetch('/api/admin/cc-emails', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                
+                bootstrap.Modal.getInstance(document.getElementById('editCcModal')).hide();
+                loadCcEmails();
+                showAlert('success', 'CC email updated');
+            } catch (error) {
+                showAlert('danger', 'Error updating CC email');
+            }
+        }
+        
+        async function deleteCcEmail(id) {
+            if (!confirm('Delete this CC email?')) return;
+            
+            try {
+                const response = await fetch(`/api/admin/cc-emails/${id}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    loadCcEmails();
+                    showAlert('success', 'CC email deleted');
+                }
+            } catch (error) {
+                showAlert('danger', 'Error deleting CC email');
+            }
+        }
+        
+        // async function loadLogo() {
+        //     try {
+        //         const response = await fetch('/api/admin/logo');
+        //         const data = await response.json();
+        //         const preview = document.getElementById('logoPreview');
+        //         const status = document.getElementById('logoStatus');
+                
+        //         if (data.logo_exists) {
+        //             preview.innerHTML = `
+        //                 <img src="/uploads/logo/company_logo.jpeg" class="logo-preview mx-auto d-block" alt="Company Logo" onerror="this.style.display='none'">
+        //                 <p class="text-success mt-2"><i class="fas fa-check-circle"></i> Logo ready for emails</p>
+        //             `;
+        //             status.innerHTML = `<span class="badge bg-success">Active: ${data.logo_path}</span>`;
+        //         } else {
+        //             preview.innerHTML = `
+        //                 <div class="text-center py-4">
+        //                     <i class="fas fa-image fa-4x text-muted"></i>
+        //                     <p class="text-muted">No logo uploaded</p>
+        //                 </div>
+        //             `;
+        //             status.innerHTML = '<span class="badge bg-secondary">No logo</span>';
+        //         }
+        //     } catch (error) {
+        //         console.error('Error loading logo:', error);
+        //     }
+        // }
+        
+        async function uploadLogo() {
+            const file = document.getElementById('logoFile').files[0];
+            if (!file) return;
+            
+            if (!file.type.startsWith('image/')) {
+                showAlert('warning', 'Please select an image file');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('logo', file);
+            
+            try {
+                const response = await fetch('/api/admin/logo-upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    loadLogo();
+                    showAlert('success', 'Logo uploaded successfully');
+                } else {
+                    showAlert('danger', data.error || 'Upload failed');
+                }
+            } catch (error) {
+                showAlert('danger', 'Upload error');
+            }
+        }
+        
+        function showAlert(type, message) {
+            const container = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type} alert-dismissible fade show position-relative`;
+            alert.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close position-absolute" style="top: 10px; right: 10px;" data-bs-dismiss="alert"></button>
+            `;
+            container.appendChild(alert);
+            setTimeout(() => alert.remove(), 5000);
+        }
+        
+        // Enter key on forms
+        document.getElementById('newCcEmail').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addCcEmail();
+        });
+        
+        // Init
+        document.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>
+
+
