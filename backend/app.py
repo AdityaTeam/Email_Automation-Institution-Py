@@ -47,6 +47,18 @@ def bad_request(e):
     return render_template('error.html', error=str(getattr(e, 'description', 'Bad Request'))), 400
 
 
+@app.errorhandler(415)
+def unsupported_media_type(e):
+    """Handle 415 Unsupported Media Type"""
+    print("⚠️ 415 Unsupported Media Type intercepted:", e)
+    if request.path.startswith('/api/') or request.is_json or request.accept_mimetypes.accept_json:
+        return jsonify({
+            'success': False,
+            'error': f"Unsupported Media Type (415): {str(getattr(e, 'description', e))}"
+        }), 415
+    return render_template('error.html', error='Unsupported Media Type (415)'), 415
+
+
 @app.errorhandler(404)
 def not_found(e):
     """Handle 404 errors"""

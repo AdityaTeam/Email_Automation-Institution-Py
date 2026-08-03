@@ -10,6 +10,8 @@ from database import MongoDB, Collections
 from bson import ObjectId
 import os
 import re
+import json
+import mimetypes
 import traceback
 import pandas as pd
 from werkzeug.utils import secure_filename
@@ -420,28 +422,176 @@ def get_cc_emails():
 @require_login
 def send_emails():
     """Send bulk emails with automatic sender rotation and full line-by-line tracing"""
-    print("\n" + "=" * 80)
-    print("🚀 [Step 1] Request received for /api/send")
-    print(f"   User ID (session): {session.get('user_id')}")
-    print(f"   Username (session): {session.get('username')}")
-    print(f"   Content Type: {request.content_type}")
-    print("=" * 80)
-
     try:
-        data = request.get_json(silent=True) or {}
-        recipients = data.get('recipients', [])
-        cc_emails = data.get('cc_emails', [])
-        sender_email_id = str(data.get('sender_email_id', '')).strip()
-        from_name = str(data.get('from_name') or session.get('username', 'Sender')).strip()
-        subject = str(data.get('subject', '')).strip()
-        body = str(data.get('body', '')).strip()
-        template_id = data.get('template_id')
-        attachments = []
-        is_html = bool(data.get('is_html', False))
-        separate_threads = bool(data.get('separate_threads', True))
-        signature_data = data.get('signature_data', {})
+        content_type = str(request.content_type or '')
+        print("\n" + "=" * 80)
+        print("🚀 [STEP 1] Request received for /api/send")
+        print("   Content-Type:", request.content_type)
+        print("   Form Keys:", list(request.form.keys()) if request.form else [])
+        print("   Files Keys:", list(request.files.keys()) if request.files else [])
+        print(f"   User ID (session): {session.get('user_id')}")
+        print(f"   Username (session): {session.get('username')}")
+        print("=" * 80)
 
-        # Normalize CC emails
+        custom_logo = None
+        attachments = []
+        sender_email_id = ''
+        template_id = None
+        subject = ''
+        body = ''
+        from_name = ''
+        is_html = False
+        separate_threads = True
+        recipients = []
+        cc_emails = []
+        signature_data = {}
+
+        # 1. Strictly isolated multipart/form-data path (ZERO calls to request.get_json or request.json)
+        if content_type.startswith("multipart/form-data") or 'multipart/form-data' in content_type:
+            print("📋 [STEP 2] Parsing multipart/form-data form fields...")
+            sender_email_id = str(request.form.get("sender_email_id", "") or "").strip()
+            template_id = request.form.get("template_id")
+            subject = str(request.form.get("subject", "") or "").strip()
+            body = str(request.form.get("body", "") or "").strip()
+            from_name = str(request.form.get("from_name") or session.get("username", "Sender") or "Sender").strip()
+            
+            is_html_val = request.form.get("is_html", "false")
+            is_html = str(is_html_val).lower() in ["true", "1", "yes"]
+            
+            sep_val = request.form.get("separate_threads", "true")
+            separate_threads = str(sep_val).lower() in ["true", "1", "yes"]
+
+            raw_recipients = request.form.get("recipients")
+            if raw_recipients:
+                try:
+                    recipients = json.loads(raw_recipients)
+                except Exception as e:
+                    print(f"❌ [STEP 2] Malformed JSON in recipients: {e}")
+                    return jsonify({'success': False, 'error': f'Invalid JSON format in recipients: {e}'}), 400
+            else:
+                recipients = []
+
+            raw_cc = request.form.get("cc_emails")
+            if raw_cc:
+                try:
+                    cc_emails = json.loads(raw_cc)
+                except Exception as e:
+                    print(f"⚠️ [STEP 2] Malformed JSON in cc_emails: {e}")
+                    cc_emails = [c.strip() for c in str(raw_cc).split(',') if c.strip()]
+            else:
+                cc_emails = []
+
+            raw_sig = request.form.get("signature_data")
+            if raw_sig:
+                try:
+                    signature_data = json.loads(raw_sig)
+                except Exception as e:
+                    print(f"⚠️ [STEP 2] Malformed JSON in signature_data: {e}")
+                    signature_data = {}
+            else:
+                signature_data = {}
+
+        # 2. application/json request path
+        elif content_type.startswith("application/json") or 'application/json' in content_type:
+            print("📋 [STEP 2] Parsing application/json payload...")
+            try:
+                data = request.get_json(silent=True) or {}
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'Invalid JSON payload: {e}'}), 400
+
+            recipients = data.get('recipients', [])
+            cc_emails = data.get('cc_emails', [])
+            sender_email_id = str(data.get('sender_email_id', '') or '').strip()
+            from_name = str(data.get('from_name') or session.get('username', 'Sender') or 'Sender').strip()
+            subject = str(data.get('subject', '') or '').strip()
+            body = str(data.get('body', '') or '').strip()
+            template_id = data.get('template_id')
+            is_html = bool(data.get('is_html', False))
+            separate_threads = bool(data.get('separate_threads', True))
+            signature_data = data.get('signature_data', {})
+        else:
+            print("📋 [STEP 2] Parsing fallback request...")
+            if request.form:
+                sender_email_id = str(request.form.get("sender_email_id", "") or "").strip()
+                template_id = request.form.get("template_id")
+                subject = str(request.form.get("subject", "") or "").strip()
+                body = str(request.form.get("body", "") or "").strip()
+                from_name = str(request.form.get("from_name") or session.get("username", "Sender") or "Sender").strip()
+                is_html = str(request.form.get("is_html", "")).lower() in ["true", "1", "yes"]
+                separate_threads = str(request.form.get("separate_threads", "")).lower() in ["true", "1", "yes"]
+                try:
+                    recipients = json.loads(request.form.get("recipients", "[]"))
+                except Exception:
+                    recipients = []
+                try:
+                    cc_emails = json.loads(request.form.get("cc_emails", "[]"))
+                except Exception:
+                    cc_emails = []
+                try:
+                    signature_data = json.loads(request.form.get("signature_data", "{}"))
+                except Exception:
+                    signature_data = {}
+            else:
+                data = request.get_json(silent=True) or {}
+                recipients = data.get('recipients', [])
+                cc_emails = data.get('cc_emails', [])
+                sender_email_id = str(data.get('sender_email_id', '') or '').strip()
+                from_name = str(data.get('from_name') or session.get('username', 'Sender') or 'Sender').strip()
+                subject = str(data.get('subject', '') or '').strip()
+                body = str(data.get('body', '') or '').strip()
+                template_id = data.get('template_id')
+                is_html = bool(data.get('is_html', False))
+                separate_threads = bool(data.get('separate_threads', True))
+                signature_data = data.get('signature_data', {})
+
+        # [STEP 3] Parse uploaded logo file safely
+        if request.files and 'logo' in request.files:
+            logo_file = request.files.get("logo")
+            if logo_file is not None and getattr(logo_file, 'filename', None) and logo_file.filename.strip():
+                print("🖼️ [STEP 3] Logo received:", logo_file.filename)
+                filename = secure_filename(logo_file.filename)
+                if not filename:
+                    filename = "company_logo.png"
+                ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+                allowed_logo_exts = {'png', 'jpg', 'jpeg', 'svg', 'webp'}
+                
+                print(f"   [STEP 3] Logo filename: '{filename}', Ext: '{ext}', Content-Type: '{getattr(logo_file, 'content_type', '')}'")
+                
+                if ext not in allowed_logo_exts:
+                    print(f"❌ [STEP 3] Unsupported logo extension '{ext}'")
+                    return jsonify({
+                        'success': False,
+                        'error': f"Unsupported logo format (.{ext}). Allowed formats: PNG, JPG, JPEG, SVG, WEBP."
+                    }), 400
+
+                try:
+                    logo_bytes = logo_file.read()
+                except Exception as read_err:
+                    print(f"❌ [STEP 3] Error reading logo file: {read_err}")
+                    return jsonify({'success': False, 'error': f'Failed to read uploaded logo file: {read_err}'}), 400
+
+                logo_size = len(logo_bytes) if logo_bytes else 0
+                print(f"   [STEP 3] Logo bytes read: {logo_size} bytes")
+
+                if logo_size > 2 * 1024 * 1024:
+                    print(f"❌ [STEP 3] Logo file exceeds 2MB limit ({logo_size} bytes)")
+                    return jsonify({
+                        'success': False,
+                        'error': 'Logo file size exceeds the maximum allowed limit of 2 MB.'
+                    }), 400
+
+                if logo_size == 0:
+                    print("⚠️ [STEP 3] Warning: Uploaded logo file is 0 bytes, falling back to default logo")
+                else:
+                    mimetype = getattr(logo_file, 'content_type', None) or mimetypes.guess_type(filename)[0] or 'image/png'
+                    custom_logo = {
+                        'filename': filename,
+                        'data': logo_bytes,
+                        'mimetype': mimetype
+                    }
+                    print(f"✅ [STEP 3] Custom logo validated and ready: {filename} ({logo_size} bytes, MIME: {mimetype})")
+
+        # [STEP 4] Normalize and validate parameters
         if isinstance(cc_emails, str):
             cc_emails = [c.strip() for c in cc_emails.split(',') if c.strip()]
         elif isinstance(cc_emails, list):
@@ -449,40 +599,39 @@ def send_emails():
         else:
             cc_emails = []
 
-        print("📋 [Step 2] JSON parsed successfully:")
+        print("📋 [STEP 4] Validating parameters:")
         print(f"   Sender ID: {sender_email_id}")
         print(f"   From Name: {from_name}")
         print(f"   Subject: {subject}")
         print(f"   Template ID: {template_id}")
         print(f"   Is HTML: {is_html}")
+        print(f"   Custom Logo: {'Yes' if custom_logo else 'No'}")
         print(f"   CC Emails: {cc_emails}")
         print(f"   Signature Data: {signature_data}")
 
-        # Basic validations
         if not recipients:
-            print("❌ Validation Error: No recipients provided")
+            print("❌ [STEP 4] Validation Error: No recipients provided")
             return jsonify({'success': False, 'error': 'No recipients provided'}), 400
         if not sender_email_id:
-            print("❌ Validation Error: No sender email ID selected")
+            print("❌ [STEP 4] Validation Error: No sender email ID selected")
             return jsonify({'success': False, 'error': 'Please select a sender email ID'}), 400
         if not subject:
-            print("❌ Validation Error: Email subject is missing")
+            print("❌ [STEP 4] Validation Error: Email subject is missing")
             return jsonify({'success': False, 'error': 'Email subject is required'}), 400
         if not body:
-            print("❌ Validation Error: Email body is missing")
+            print("❌ [STEP 4] Validation Error: Email body is missing")
             return jsonify({'success': False, 'error': 'Email body is required'}), 400
 
-        # Validate and normalize recipients list
         if not isinstance(recipients, list):
-            print("❌ Validation Error: Recipients must be a list")
+            print("❌ [STEP 4] Validation Error: Recipients must be a list")
             return jsonify({'success': False, 'error': 'Recipients must be a list'}), 400
 
         normalized_recipients = []
         for r in recipients:
             if isinstance(r, dict):
-                email = str(r.get('email', '')).strip()
-                name = str(r.get('name', '')).strip() if r.get('name') else ''
-                institute = str(r.get('institute', '')).strip() if r.get('institute') else ''
+                email = str(r.get('email', '') or '').strip()
+                name = str(r.get('name', '') or '').strip() if r.get('name') else ''
+                institute = str(r.get('institute', '') or '').strip() if r.get('institute') else ''
             elif isinstance(r, str):
                 email = r.strip()
                 name = ''
@@ -493,36 +642,39 @@ def send_emails():
             if email and '@' in email:
                 normalized_recipients.append({'email': email, 'name': name, 'institute': institute})
 
-        print("👥 [Step 3] Recipients loaded:")
-        print(f"   Total parsed recipients: {len(normalized_recipients)}")
-        print(f"   Parsed recipient details: {normalized_recipients}")
+        print(f"👥 [STEP 4] Total parsed valid recipients: {len(normalized_recipients)}")
 
         if not normalized_recipients:
-            print("❌ Validation Error: No valid email addresses found in recipients")
+            print("❌ [STEP 4] Validation Error: No valid email addresses found in recipients")
             return jsonify({'success': False, 'error': 'No valid recipient email addresses found in request'}), 400
 
-        # Retrieve sender credentials from database
+        # [STEP 5] Initialize sender accounts from database
         user_id = session.get('user_id')
-        user_email_ids = EmailID.get_by_user_with_passwords(user_id) if user_id else []
+        user_email_ids = []
+        try:
+            user_email_ids = EmailID.get_by_user_with_passwords(user_id) if user_id else []
+        except Exception as e:
+            print(f"⚠️ Warning retrieving email accounts for user: {e}")
 
-        # If user_email_ids is empty or missing selected sender, check directly by sender_email_id
-        selected_account_doc = EmailID.get_by_id_with_password(sender_email_id)
-        if selected_account_doc:
-            doc_id_str = str(selected_account_doc.get('_id', ''))
-            already_present = any(str(e.get('_id', '')) == doc_id_str for e in user_email_ids)
-            if not already_present:
-                user_email_ids.insert(0, selected_account_doc)
+        try:
+            selected_account_doc = EmailID.get_by_id_with_password(sender_email_id)
+            if selected_account_doc:
+                doc_id_str = str(selected_account_doc.get('_id', ''))
+                already_present = any(str(e.get('_id', '')) == doc_id_str for e in user_email_ids)
+                if not already_present:
+                    user_email_ids.insert(0, selected_account_doc)
+        except Exception as e:
+            print(f"⚠️ Warning retrieving selected sender account: {e}")
 
         if not user_email_ids:
-            print(f"❌ Sender Account Error: No email accounts found for user {user_id} or ID {sender_email_id}")
+            print(f"❌ [STEP 5] Sender Account Error: No email accounts found for user {user_id} or ID {sender_email_id}")
             return jsonify({'success': False, 'error': 'No sender email accounts found for your user. Please configure an email account first.'}), 400
 
-        # Build email accounts list
         email_accounts = []
         for eid in user_email_ids:
             email_accounts.append({
-                'email': str(eid.get('email', '')).strip(),
-                'password': str(eid.get('password', '')).strip(),
+                'email': str(eid.get('email', '') or '').strip(),
+                'password': str(eid.get('password', '') or '').strip(),
                 'smtp_server': str(eid.get('smtp_server') or 'smtp.gmail.com').strip(),
                 'smtp_port': int(eid.get('smtp_port') or 587),
                 'use_tls': eid.get('use_tls', True),
@@ -531,14 +683,14 @@ def send_emails():
                 'emails_sent': eid.get('emails_sent', 0)
             })
 
-        # Match start_index
         start_index = 0
         for i, acc in enumerate(email_accounts):
             if acc['_id'] == sender_email_id or acc['email'] == sender_email_id:
                 start_index = i
                 break
 
-        # Fetch template attachments if template_id provided
+        # [STEP 6] Preparing MIME, personalizing body, and embedding signature / logo
+        print("📝 [STEP 6] Preparing message bodies and resolving attachments...")
         if template_id and str(template_id).strip():
             try:
                 template = Template.get_by_id(template_id)
@@ -562,11 +714,41 @@ def send_emails():
             except Exception as tmpl_err:
                 print(f"⚠️ Warning: Error resolving template attachments: {tmpl_err}")
 
+        # Check if default logo exists on disk
+        default_logo_paths = [
+            os.path.join(os.getcwd(), 'backend', 'uploads', 'logo', 'company_logo.jpeg'),
+            os.path.join(os.getcwd(), 'uploads', 'logo', 'company_logo.jpeg'),
+            os.path.join(os.path.dirname(__file__), '..', 'uploads', 'logo', 'company_logo.jpeg'),
+        ]
+        has_default_logo = any(os.path.exists(p) for p in default_logo_paths)
+        has_logo = (custom_logo is not None) or has_default_logo
+
+        # Auto-enable is_html if a logo is present, signature is present, or body contains HTML
+        if has_logo or custom_logo or ('<' in body and '>' in body):
+            is_html = True
+
         # Build signature and body
-        signature = Template.build_signature(signature_data)
+        try:
+            signature = Template.build_signature(signature_data)
+        except Exception:
+            signature = ""
+
         if is_html:
-            processed_body = Template.process_body(body)
-            processed_signature = Template.process_body(signature)
+            try:
+                processed_body = Template.process_body(body)
+            except Exception:
+                processed_body = body
+            try:
+                processed_signature = Template.process_body(signature)
+            except Exception:
+                processed_signature = signature
+
+            if has_logo:
+                logo_img_tag = '<br><br><img src="cid:company_logo" alt="Company Logo" style="max-width: 140px; max-height: 70px; height: auto;" border="0" />'
+                if processed_signature:
+                    processed_signature = processed_signature + logo_img_tag
+                else:
+                    processed_signature = logo_img_tag
         else:
             processed_body = body
             processed_signature = signature
@@ -585,6 +767,11 @@ def send_emails():
                     p_body = p_body + '\n\n' + processed_signature
             personalized_recipients.append({'email': r['email'], 'body': p_body})
 
+        if personalized_recipients:
+            print(f"📝 [STEP 6] Prepared {len(personalized_recipients)} messages. Sample HTML body for {personalized_recipients[0]['email']}:\n{personalized_recipients[0]['body']}")
+
+        # [STEP 7] Initializing EmailSender and executing SMTP dispatch
+        print("🚀 [STEP 7] Initializing EmailSender and starting bulk dispatch...")
         BATCH_SIZE = 25
         sender = EmailSender(email_accounts, batch_size=BATCH_SIZE, user_id=user_id)
         sender.current_account_index = start_index
@@ -598,18 +785,17 @@ def send_emails():
             attachments=attachments,
             is_html=is_html,
             delay_between_emails=1,
-            separate_threads=separate_threads
+            separate_threads=separate_threads,
+            custom_logo=custom_logo
         )
 
         sent_entries = result.get("sent_entries", [])
         failed_list = result.get("failed", [])
         sent_count = len(sent_entries)
+        print(f"📊 [STEP 7] Sending finished: {sent_count} sent, {len(failed_list)} failed")
 
-        print("\n" + "=" * 80)
-        print("💾 [Step 8] Database update (logging sent/failed attempts):")
-        print(f"   Sent count: {sent_count}, Failed count: {len(failed_list)}")
-
-        # Log results to DB safely - each write wrapped separately
+        # [STEP 8] Updating database logs safely
+        print("💾 [STEP 8] Updating database logs...")
         for sent_entry in sent_entries:
             log_sender_id = sent_entry.get('sender_email_id') or sender_email_id
             try:
@@ -631,7 +817,6 @@ def send_emails():
             except Exception as log_err:
                 print(f"   ⚠️ Database write warning for failed log: {log_err}")
 
-        # Fetch updated telemetry for frontend
         try:
             stats = EmailLog.get_stats(user_id)
         except Exception:
@@ -659,7 +844,8 @@ def send_emails():
         except Exception:
             recent_logs = []
 
-        print("🎉 [Step 9] Returning JSON response to client:")
+        # [STEP 9] Returning JSON response to client
+        print("🎉 [STEP 9] Returning JSON response to client:")
         print(f"   Success: True, Sent: {sent_count}, Failed: {len(failed_list)}")
         print("=" * 80 + "\n")
 

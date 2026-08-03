@@ -118,6 +118,40 @@
                                             <small class="text-muted">Optional - overrides username in From header</small>
                                         </div>
                                     </div>
+
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label class="form-label d-flex justify-content-between align-items-center">
+                                                <span>Company Logo</span>
+                                                <small class="text-muted">Max 2 MB</small>
+                                            </label>
+                                            <div class="d-flex align-items-center gap-2">
+                                                <input type="file" id="logoFileInput" accept=".png,.jpg,.jpeg,.svg,.webp,image/png,image/jpeg,image/svg+xml,image/webp" style="display: none;">
+                                                <button type="button" class="btn btn-outline-primary btn-sm text-nowrap" id="chooseLogoBtn">
+                                                    <i class="fas fa-image me-1"></i> Choose Logo
+                                                </button>
+                                                <span id="logoFileName" class="text-muted small text-truncate flex-grow-1" title="No custom logo selected (using default)">No custom logo</span>
+                                            </div>
+                                            
+                                            <!-- Logo Preview Box -->
+                                            <div id="logoPreviewContainer" class="mt-2 p-2 border rounded bg-light" style="display: none;">
+                                                <div class="d-flex align-items-center justify-content-between mb-1">
+                                                    <span class="small fw-bold text-secondary"><i class="fas fa-check-circle text-success me-1"></i>Custom Logo</span>
+                                                    <div class="btn-group btn-group-sm">
+                                                        <button type="button" class="btn btn-outline-secondary py-0 px-2 btn-sm" id="replaceLogoBtn" title="Replace Logo">
+                                                            <i class="fas fa-sync-alt"></i> Replace
+                                                        </button>
+                                                        <button type="button" class="btn btn-outline-danger py-0 px-2 btn-sm" id="removeLogoBtn" title="Remove Logo">
+                                                            <i class="fas fa-trash-alt"></i> Remove
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div class="text-center p-2 bg-white rounded border">
+                                                    <img id="logoPreviewImg" src="" alt="Logo Preview" style="max-height: 55px; max-width: 100%; object-fit: contain;">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="template-info" id="templateInfo" style="display: none;">
                                     <i class="fas fa-info-circle"></i> <span id="templateInfoText"></span>
@@ -198,7 +232,7 @@ Best Regards,
                                 
                                 <div class="mb-3 mt-3">
                                     <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="htmlFormat">
+                                        <input class="form-check-input" type="checkbox" id="htmlFormat" checked>
                                         <label class="form-check-label" for="htmlFormat">Send as HTML</label>
                                     </div>
                                 </div>
@@ -284,6 +318,73 @@ Best Regards,
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let recipients = [];
+        let uploadedLogoFile = null;
+        let uploadedLogoDataUrl = null;
+
+        const logoFileInput = document.getElementById('logoFileInput');
+        const chooseLogoBtn = document.getElementById('chooseLogoBtn');
+        const replaceLogoBtn = document.getElementById('replaceLogoBtn');
+        const removeLogoBtn = document.getElementById('removeLogoBtn');
+        const logoFileName = document.getElementById('logoFileName');
+        const logoPreviewContainer = document.getElementById('logoPreviewContainer');
+        const logoPreviewImg = document.getElementById('logoPreviewImg');
+
+        if (chooseLogoBtn && logoFileInput) {
+            chooseLogoBtn.addEventListener('click', () => logoFileInput.click());
+        }
+        if (replaceLogoBtn && logoFileInput) {
+            replaceLogoBtn.addEventListener('click', () => logoFileInput.click());
+        }
+        if (removeLogoBtn && logoFileInput) {
+            removeLogoBtn.addEventListener('click', () => {
+                logoFileInput.value = '';
+                uploadedLogoFile = null;
+                uploadedLogoDataUrl = null;
+                logoPreviewImg.src = '';
+                logoPreviewContainer.style.display = 'none';
+                logoFileName.textContent = 'No custom logo';
+                logoFileName.title = 'No custom logo selected (using default)';
+            });
+        }
+
+        if (logoFileInput) {
+            logoFileInput.addEventListener('change', function() {
+                const file = this.files && this.files[0];
+                if (!file) return;
+
+                // Validate file extension
+                const allowedExts = ['png', 'jpg', 'jpeg', 'svg', 'webp'];
+                const fileExt = file.name.split('.').pop().toLowerCase();
+                if (!allowedExts.includes(fileExt) && !file.type.startsWith('image/')) {
+                    showAlert('danger', 'Unsupported file type. Please upload a PNG, JPG, JPEG, SVG, or WEBP image.');
+                    this.value = '';
+                    return;
+                }
+
+                // Validate size <= 2MB (2 * 1024 * 1024 bytes)
+                const maxSize = 2 * 1024 * 1024;
+                if (file.size > maxSize) {
+                    showAlert('warning', `File size (${(file.size / (1024 * 1024)).toFixed(2)} MB) exceeds maximum allowed size of 2 MB.`);
+                    this.value = '';
+                    return;
+                }
+
+                uploadedLogoFile = file;
+                logoFileName.textContent = file.name;
+                logoFileName.title = file.name;
+                if (document.getElementById('htmlFormat')) {
+                    document.getElementById('htmlFormat').checked = true;
+                }
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    uploadedLogoDataUrl = e.target.result;
+                    logoPreviewImg.src = uploadedLogoDataUrl;
+                    logoPreviewContainer.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            });
+        }
         
         // Update signature preview when fields change
         function updateSignaturePreview() {
@@ -449,6 +550,7 @@ ${companyWebsite}`;
         document.getElementById('previewBtn').addEventListener('click', function() {
             const subject = document.getElementById('emailSubject').value;
             let body = document.getElementById('emailBody').value;
+            const isHtml = document.getElementById('htmlFormat').checked;
 
             if (!subject || !body) {
                 showAlert('warning', 'Please select a template');
@@ -456,25 +558,36 @@ ${companyWebsite}`;
             }
 
             const signature = document.getElementById('signaturePreview').textContent;
-            body += '\n\n' + signature;
+            document.getElementById('previewSubject').textContent = subject;
+            const previewBodyEl = document.getElementById('previewBody');
 
-            let previewSubject = subject;
-            let previewBody = body;
-
-            document.getElementById('previewSubject').textContent = previewSubject;
-            document.getElementById('previewBody').textContent = previewBody;
+            if (isHtml) {
+                let htmlContent = body.replace(/\n/g, '<br>');
+                let sigHtml = signature.replace(/\n/g, '<br>');
+                let logoHtml = '';
+                if (uploadedLogoDataUrl) {
+                    logoHtml = `<br><br><img src="${uploadedLogoDataUrl}" alt="Company Logo" style="max-width: 140px; max-height: 70px; display: block; border: 0;">`;
+                } else {
+                    logoHtml = `<br><br><span class="badge bg-light text-secondary border p-2"><i class="fas fa-image text-primary me-1"></i> [Company Logo: Default]</span>`;
+                }
+                previewBodyEl.innerHTML = htmlContent + '<br><br>' + sigHtml + logoHtml;
+                previewBodyEl.style.whiteSpace = 'normal';
+            } else {
+                previewBodyEl.textContent = body + '\n\n' + signature;
+                previewBodyEl.style.whiteSpace = 'pre-wrap';
+            }
 
             // show attachments count in preview if template selected
             const tmpl = document.getElementById('templateSelect').value;
+            const existingAttachInfo = document.getElementById('previewAttachInfo');
+            if (existingAttachInfo) existingAttachInfo.remove();
+
             if (tmpl) {
-                const attachInfo = document.getElementById('previewAttachInfo');
-                if (!attachInfo) {
-                    const p = document.createElement('p');
-                    p.id = 'previewAttachInfo';
-                    p.className = 'mt-2';
-                    p.innerHTML = '<em>(Attachments from selected template will be included)</em>';
-                    document.getElementById('previewBody').parentNode.insertBefore(p, document.getElementById('previewBody').nextSibling);
-                }
+                const p = document.createElement('p');
+                p.id = 'previewAttachInfo';
+                p.className = 'mt-3 text-muted small border-top pt-2';
+                p.innerHTML = '<i class="fas fa-paperclip me-1"></i> <em>Attachments from selected template will be included in delivery.</em>';
+                previewBodyEl.parentNode.appendChild(p);
             }
 
             new bootstrap.Modal(document.getElementById('previewModal')).show();
@@ -506,9 +619,6 @@ ${companyWebsite}`;
                 company_website: document.getElementById('companyWebsite').value
             };
             
-            // DO NOT add signature here - backend will handle it
-            // This prevents duplicate "Best Regards" in sent emails
-            
             setSendingState(true);
             document.getElementById('progressCard').style.display = 'block';
             document.getElementById('syncStatus').style.display = 'none';
@@ -521,23 +631,32 @@ ${companyWebsite}`;
             
             try {
                 const selectedTemplate = document.getElementById('templateSelect').value;
-                console.log('Sending with CC:', ccEmails);
+                console.log('Sending with CC:', ccEmails, 'Custom Logo:', uploadedLogoFile ? uploadedLogoFile.name : 'None (Default)');
                 
-                const response = await fetch('/api/send', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sender_email_id: senderEmailId,
-                        from_name: senderName,
-                        recipients: recipients,
-                        cc_emails: ccEmails,  // ✅ Fixed: Use actual CC selection
-                        template_id: selectedTemplate,
-                        subject: subject,
-                        body: body,
-                        is_html: isHtml,
-                        signature_data: signatureData
-                    })
-                });
+                const formData = new FormData();
+                formData.append('sender_email_id', senderEmailId);
+                formData.append('from_name', senderName);
+                formData.append('recipients', JSON.stringify(recipients));
+                formData.append('cc_emails', JSON.stringify(ccEmails));
+                formData.append('template_id', selectedTemplate);
+                formData.append('subject', subject);
+                formData.append('body', body);
+                formData.append('is_html', isHtml ? 'true' : 'false');
+                formData.append('signature_data', JSON.stringify(signatureData));
+                if (uploadedLogoFile) {
+                    formData.append('logo', uploadedLogoFile);
+                }
+
+                let response;
+                try {
+                    response = await fetch('/api/send', {
+                        method: 'POST',
+                        body: formData
+                    });
+                } catch (fetchErr) {
+                    console.error('Fetch network error:', fetchErr);
+                    throw new Error(`Connection error: ${fetchErr.message || 'Server connection lost. Check server logs.'}`);
+                }
                 
                 let data = null;
                 const contentType = response.headers.get('content-type') || '';
@@ -546,7 +665,7 @@ ${companyWebsite}`;
                 } else {
                     const rawText = await response.text();
                     console.error('Non-JSON server response:', rawText);
-                    throw new Error(`Server error (${response.status}): Expected JSON response from server.`);
+                    throw new Error(`Server error (${response.status}): ${rawText.slice(0, 300)}`);
                 }
                 
                 if (!response.ok || !data.success) {
