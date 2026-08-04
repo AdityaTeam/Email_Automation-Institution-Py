@@ -501,40 +501,49 @@ Best Regards,
     
     @staticmethod
     def build_signature(signature_data):
-        """Build signature from user-provided data"""
-        if not isinstance(signature_data, dict):
-            signature_data = {}
-        signature = Template.DEFAULT_SIGNATURE_FORMAT
-        signature = signature.replace('{{executive_name}}', str(signature_data.get('executive_name') or ''))
-        signature = signature.replace('{{position}}', str(signature_data.get('position') or ''))
-        signature = signature.replace('{{company_name}}', str(signature_data.get('company_name') or ''))
-        signature = signature.replace('{{company_email}}', str(signature_data.get('company_email') or ''))
-        signature = signature.replace('{{company_phone}}', str(signature_data.get('company_phone') or ''))
-        signature = signature.replace('{{company_website}}', str(signature_data.get('company_website') or ''))
-        return signature.strip()
+        """Build signature from user-provided data (plain text)"""
+        try:
+            from email_renderer import build_plain_signature
+            return build_plain_signature(signature_data)
+        except Exception:
+            if not isinstance(signature_data, dict):
+                signature_data = {}
+            signature = Template.DEFAULT_SIGNATURE_FORMAT
+            signature = signature.replace('{{executive_name}}', str(signature_data.get('executive_name') or ''))
+            signature = signature.replace('{{position}}', str(signature_data.get('position') or ''))
+            signature = signature.replace('{{company_name}}', str(signature_data.get('company_name') or ''))
+            signature = signature.replace('{{company_email}}', str(signature_data.get('company_email') or ''))
+            signature = signature.replace('{{company_phone}}', str(signature_data.get('company_phone') or ''))
+            signature = signature.replace('{{company_website}}', str(signature_data.get('company_website') or ''))
+            return signature.strip()
+
+    @staticmethod
+    def build_html_signature(signature_data, has_logo=True):
+        """Build HTML signature from user-provided data with inline logo"""
+        try:
+            from email_renderer import build_html_signature
+            return build_html_signature(signature_data, has_logo=has_logo)
+        except Exception:
+            return Template.build_signature(signature_data)
     
     @staticmethod
     def process_body(body):
         """
         Process template body to convert markdown-like formatting to HTML
-        Converts **text** to <strong>text</strong>
-        Converts *text* to <em>text</em>
+        Converts paragraphs, **bold**, *italic*, lists, and line breaks
         """
         if not body:
             return ""
-        import re
-        body = str(body)
-        
-        # Convert **text** to <strong>text</strong>
-        body = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', body)
-        
-        # Convert *text* to <em>text</em> (but not **)
-        body = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<em>\1</em>', body)
-        
-        # Convert line breaks to <br>
-        body = body.replace('\n', '<br>')
-        
-        return body
+        try:
+            from email_renderer import convert_text_to_html_paragraphs
+            return convert_text_to_html_paragraphs(body)
+        except Exception:
+            import re
+            body = str(body)
+            body = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', body)
+            body = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<em>\1</em>', body)
+            body = body.replace('\n', '<br>')
+            return body
 
 
 class CcEmail:

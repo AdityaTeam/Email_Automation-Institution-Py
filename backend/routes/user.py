@@ -231,6 +231,13 @@ def upload_file():
                 'reason': reason or ('Mailbox exists' if is_valid else 'Invalid email')
             }
             
+            # Preserve all row columns for custom placeholder replacement
+            for col_name in df.columns:
+                col_key = str(col_name).strip()
+                if col_key not in recipient:
+                    col_val = str(row[col_name]).strip() if col_name in row and str(row[col_name]).lower() != 'nan' else ''
+                    recipient[col_key] = col_val
+
             if is_valid:
                 valid_count += 1
             else:
@@ -703,18 +710,19 @@ def send_emails():
         normalized_recipients = []
         for r in recipients:
             if isinstance(r, dict):
-                email = str(r.get('email', '') or '').strip()
-                name = str(r.get('name', '') or '').strip() if r.get('name') else ''
-                institute = str(r.get('institute', '') or '').strip() if r.get('institute') else ''
+                r_dict = dict(r)
+                email = str(r_dict.get('email') or r_dict.get('Email') or r_dict.get('EMAIL') or '').strip()
+                if email and '@' in email:
+                    r_dict['email'] = email
+                    if 'name' not in r_dict:
+                        r_dict['name'] = str(r_dict.get('Name') or r_dict.get('NAME') or r_dict.get('Full Name') or r_dict.get('Recipient Name') or '').strip()
+                    if 'institute' not in r_dict:
+                        r_dict['institute'] = str(r_dict.get('Institute') or r_dict.get('INSTITUTE') or r_dict.get('College') or r_dict.get('University') or r_dict.get('Company') or '').strip()
+                    normalized_recipients.append(r_dict)
             elif isinstance(r, str):
                 email = r.strip()
-                name = ''
-                institute = ''
-            else:
-                continue
-
-            if email and '@' in email:
-                normalized_recipients.append({'email': email, 'name': name, 'institute': institute})
+                if email and '@' in email:
+                    normalized_recipients.append({'email': email, 'name': '', 'institute': ''})
 
         print(f"👥 [STEP 4] Total parsed valid recipients: {len(normalized_recipients)}")
 
@@ -788,61 +796,48 @@ def send_emails():
             except Exception as tmpl_err:
                 print(f"⚠️ Warning: Error resolving template attachments: {tmpl_err}")
 
-        # Check if default logo exists on disk
-        default_logo_paths = [
-            os.path.join(os.getcwd(), 'backend', 'uploads', 'logo', 'company_logo.jpeg'),
-            os.path.join(os.getcwd(), 'uploads', 'logo', 'company_logo.jpeg'),
-            os.path.join(os.path.dirname(__file__), '..', 'uploads', 'logo', 'company_logo.jpeg'),
-        ]
-        has_default_logo = any(os.path.exists(p) for p in default_logo_paths)
-        has_logo = (custom_logo is not None) or has_default_logo
+        # Determine custom logo presence - strictly based on user upload, no fallback
+        has_logo = (custom_logo is not None)
 
-        # Auto-enable is_html if a logo is present, signature is present, or body contains HTML
-        if has_logo or custom_logo or ('<' in body and '>' in body):
+        # HTML formatting preference
+        is_html_param = request.form.get("is_html", "true")
+        is_html = str(is_html_param).lower() in ["true", "1", "yes"]
+        if has_logo or ('<' in body and '>' in body):
             is_html = True
 
-        # Build signature and body
-        try:
-            signature = Template.build_signature(signature_data)
-        except Exception:
-            signature = ""
-
-        if is_html:
-            try:
-                processed_body = Template.process_body(body)
-            except Exception:
-                processed_body = body
-            try:
-                processed_signature = Template.process_body(signature)
-            except Exception:
-                processed_signature = signature
-
-            if has_logo:
-                logo_img_tag = '<br><br><img src="cid:company_logo" alt="Company Logo" style="max-width: 140px; max-height: 70px; height: auto;" border="0" />'
-                if processed_signature:
-                    processed_signature = processed_signature + logo_img_tag
-                else:
-                    processed_signature = logo_img_tag
-        else:
-            processed_body = body
-            processed_signature = signature
+        from email_renderer import replace_placeholders, render_full_html_email, build_plain_signature, save_debug_html
 
         personalized_recipients = []
         for r in normalized_recipients:
-            p_body = processed_body
-            if r.get('name'):
-                p_body = p_body.replace('{{name}}', r['name'])
-            if r.get('institute'):
-                p_body = p_body.replace('{{institute}}', r['institute'])
-            if processed_signature:
-                if is_html:
-                    p_body = p_body + '<br><br>' + processed_signature
-                else:
-                    p_body = p_body + '\n\n' + processed_signature
-            personalized_recipients.append({'email': r['email'], 'body': p_body})
+            # 1. First replace all placeholders on subject & raw body before any HTML markup conversion
+            p_subject = replace_placeholders(subject, recipient_data=r, signature_data=signature_data)
+            p_body_raw = replace_placeholders(body, recipient_data=r, signature_data=signature_data)
+
+            # 2. Render fully styled HTML or plain text
+            if is_html:
+                p_body = render_full_html_email(
+                    body_text_or_html=p_body_raw,
+                    signature_data=signature_data,
+                    has_logo=has_logo,
+                    subject=p_subject
+                )
+            else:
+                plain_sig = build_plain_signature(signature_data)
+                p_body = p_body_raw + ('\n\n' + plain_sig if plain_sig else '')
+
+            personalized_recipients.append({
+                'email': r['email'],
+                'subject': p_subject,
+                'body': p_body
+            })
 
         if personalized_recipients:
-            print(f"📝 [STEP 6] Prepared {len(personalized_recipients)} messages. Sample HTML body for {personalized_recipients[0]['email']}:\n{personalized_recipients[0]['body']}")
+            sample_email = personalized_recipients[0]
+            print(f"📝 [STEP 6] Prepared {len(personalized_recipients)} messages. Sample Subject: '{sample_email['subject']}'")
+            if is_html:
+                save_debug_html(sample_email['body'])
+                save_debug_html(sample_email['body'], os.path.join(os.getcwd(), 'generated_email.html'))
+                print(f"🌐 [STEP 6] Generated HTML Email for {sample_email['email']} ({len(sample_email['body'])} chars)")
 
         # [STEP 7] Initializing EmailSender and executing SMTP dispatch
         print("🚀 [STEP 7] Initializing EmailSender and starting bulk dispatch...")

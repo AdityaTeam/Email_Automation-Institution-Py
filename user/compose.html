@@ -439,8 +439,8 @@ Best Regards,
                 uploadedLogoDataUrl = null;
                 logoPreviewImg.src = '';
                 logoPreviewContainer.style.display = 'none';
-                logoFileName.textContent = 'No custom logo';
-                logoFileName.title = 'No custom logo selected (using default)';
+                logoFileName.textContent = 'No logo selected';
+                logoFileName.title = 'No custom logo selected (optional)';
             });
         }
 
@@ -821,8 +821,6 @@ ${companyWebsite}`;
                 let logoHtml = '';
                 if (uploadedLogoDataUrl) {
                     logoHtml = `<br><br><img src="${uploadedLogoDataUrl}" alt="Company Logo" style="max-width: 140px; max-height: 70px; display: block; border: 0;">`;
-                } else {
-                    logoHtml = `<br><br><span class="badge bg-light text-secondary border p-2"><i class="fas fa-image text-primary me-1"></i> [Company Logo: Default]</span>`;
                 }
                 previewBodyEl.innerHTML = htmlContent + '<br><br>' + sigHtml + logoHtml;
                 previewBodyEl.style.whiteSpace = 'normal';
@@ -887,7 +885,7 @@ ${companyWebsite}`;
             
             try {
                 const selectedTemplate = document.getElementById('templateSelect').value;
-                console.log('Sending with CC:', ccEmails, 'Custom Logo:', uploadedLogoFile ? uploadedLogoFile.name : 'None (Default)');
+                console.log('Sending with CC:', ccEmails, 'Custom Logo:', uploadedLogoFile ? uploadedLogoFile.name : 'None');
                 
                 const formData = new FormData();
                 formData.append('sender_email_id', senderEmailId);

@@ -126,73 +126,41 @@ class EmailSender:
         return text.strip()
 
     def _build_logo_part(self, custom_logo=None):
-        """Build MIME inline image part for custom or default logo."""
-        # 1. Custom uploaded logo
-        if custom_logo and isinstance(custom_logo, dict):
-            try:
-                c_data = custom_logo.get('data')
-                c_filename = custom_logo.get('filename') or 'company_logo.png'
-                c_mime = custom_logo.get('mimetype') or mimetypes.guess_type(c_filename)[0] or 'image/png'
-                if c_data:
-                    main_type, sub_type = c_mime.split('/', 1) if '/' in c_mime else ('image', 'png')
-                    sub_type = sub_type.lower()
-                    if sub_type in ['jpg', 'pjpeg']:
-                        sub_type = 'jpeg'
-                    elif sub_type in ['svg+xml', 'svg']:
-                        sub_type = 'svg'
+        """
+        Build MIME inline image part ONLY if a custom logo is explicitly provided.
+        Returns None if no custom logo is uploaded (no default logo fallback).
+        """
+        if not custom_logo or not isinstance(custom_logo, dict):
+            return None
 
-                    try:
-                        part = MIMEImage(c_data, _subtype=sub_type)
-                    except Exception:
-                        part = MIMEBase(main_type, sub_type)
-                        part.set_payload(c_data)
-                        encoders.encode_base64(part)
+        try:
+            c_data = custom_logo.get('data')
+            c_filename = custom_logo.get('filename') or 'company_logo.png'
+            c_mime = custom_logo.get('mimetype') or mimetypes.guess_type(c_filename)[0] or 'image/png'
+            if c_data:
+                main_type, sub_type = c_mime.split('/', 1) if '/' in c_mime else ('image', 'png')
+                sub_type = sub_type.lower()
+                if sub_type in ['jpg', 'pjpeg']:
+                    sub_type = 'jpeg'
+                elif sub_type in ['svg+xml', 'svg']:
+                    sub_type = 'svg'
 
-                    part.add_header('Content-ID', '<company_logo>')
-                    part.add_header('Content-Disposition', 'inline', filename=c_filename)
-                    part.add_header('Content-Location', c_filename)
-                    part.add_header('X-Attachment-Id', 'company_logo')
-                    part.set_param('name', c_filename)
-                    print(f"✅ Custom inline logo attached ({len(c_data)} bytes, {c_mime}) as CID <company_logo>")
-                    return part
-            except Exception as c_err:
-                print(f"⚠️ Custom logo attach error: {c_err}")
-
-        # 2. Fallback to default company logo on disk
-        possible_logo_paths = [
-            os.path.join(os.getcwd(), "backend", "uploads", "logo", "company_logo.jpeg"),
-            os.path.join(os.getcwd(), "uploads", "logo", "company_logo.jpeg"),
-            os.path.join(os.path.dirname(__file__), "uploads", "logo", "company_logo.jpeg"),
-            os.path.join(os.path.dirname(__file__), "..", "uploads", "logo", "company_logo.jpeg"),
-            os.path.join(os.path.dirname(__file__), "backend", "uploads", "logo", "company_logo.jpeg")
-        ]
-        for logo_path in possible_logo_paths:
-            if os.path.exists(logo_path):
                 try:
-                    with open(logo_path, 'rb') as f:
-                        img_data = f.read()
-                    if img_data:
-                        mime_type, _ = mimetypes.guess_type(logo_path)
-                        sub_type = mime_type.split('/', 1)[1] if mime_type and '/' in mime_type else 'jpeg'
-                        if sub_type.lower() in ['jpg', 'pjpeg']:
-                            sub_type = 'jpeg'
-                        try:
-                            part = MIMEImage(img_data, _subtype=sub_type)
-                        except Exception:
-                            part = MIMEBase('image', sub_type)
-                            part.set_payload(img_data)
-                            encoders.encode_base64(part)
+                    part = MIMEImage(c_data, _subtype=sub_type)
+                except Exception:
+                    part = MIMEBase(main_type, sub_type)
+                    part.set_payload(c_data)
+                    encoders.encode_base64(part)
 
-                        filename = os.path.basename(logo_path)
-                        part.add_header('Content-ID', '<company_logo>')
-                        part.add_header('Content-Disposition', 'inline', filename=filename)
-                        part.add_header('Content-Location', filename)
-                        part.add_header('X-Attachment-Id', 'company_logo')
-                        part.set_param('name', filename)
-                        print(f"✅ Default inline logo attached ({len(img_data)} bytes) from: {logo_path}")
-                        return part
-                except Exception as e:
-                    print(f"⚠️ Default logo attach warning: {e}")
+                part.add_header('Content-ID', '<company_logo>')
+                part.add_header('Content-Disposition', 'inline', filename=c_filename)
+                part.add_header('Content-Location', c_filename)
+                part.add_header('X-Attachment-Id', 'company_logo')
+                part.set_param('name', c_filename)
+                print(f"✅ Custom inline logo attached ({len(c_data)} bytes, {c_mime}) as CID <company_logo>")
+                return part
+        except Exception as c_err:
+            print(f"⚠️ Custom logo attach error: {c_err}")
 
         return None
 
@@ -222,7 +190,9 @@ class EmailSender:
             elif isinstance(bcc_emails, list):
                 sanitized_bcc = [str(b).strip() for b in bcc_emails if str(b).strip()]
 
-        body_str = str(body or '')
+        # Defensive string normalization
+        body_str = body if isinstance(body, str) else str(body or '')
+        subject_str = subject if isinstance(subject, str) else str(subject or '')
 
         if is_html:
             # 1. Create multipart/alternative with plain-text fallback and HTML
@@ -289,7 +259,7 @@ class EmailSender:
             msg['Cc'] = ", ".join(sanitized_cc)
         if sanitized_bcc:
             msg['Bcc'] = ", ".join(sanitized_bcc)
-        msg['Subject'] = str(subject or '')
+        msg['Subject'] = subject_str
         msg['Date'] = formatdate(localtime=True)
         msg['Message-ID'] = make_msgid()
 
@@ -379,7 +349,21 @@ class EmailSender:
         """
         Send a single email with robust error handling and retry
         """
-        # Ensure active SMTP connection for current account
+        # 1. Defensive parameter validation
+        if not to_email or not str(to_email).strip():
+            return False, "Recipient email address is missing or empty"
+        
+        to_email_str = str(to_email).strip()
+
+        if body is None:
+            return False, "Email body is missing (None)"
+        body_str = body if isinstance(body, str) else str(body)
+        if not body_str.strip():
+            return False, "Email body cannot be empty"
+
+        subject_str = subject if isinstance(subject, str) else str(subject or '')
+
+        # 2. Ensure active SMTP connection for current account
         conn_ok, conn_error = self.ensure_connection()
         if not conn_ok:
             print(f"❌ Connection failed: {conn_error}")
@@ -388,9 +372,9 @@ class EmailSender:
         try:
             print("📝 [Step 6] Preparing message...")
             msg = self.create_email_message(
-                to_email=to_email,
-                subject=subject,
-                body=body,
+                to_email=to_email_str,
+                subject=subject_str,
+                body=body_str,
                 from_name=from_name,
                 cc_emails=cc_emails,
                 bcc_emails=bcc_emails,
@@ -402,7 +386,7 @@ class EmailSender:
                 return False, "Failed to construct MIME email message"
             
             # Destination recipients
-            recipients = [str(to_email).strip()]
+            recipients = [to_email_str]
             if cc_emails:
                 if isinstance(cc_emails, str):
                     recipients.extend([c.strip() for c in cc_emails.split(',') if c.strip()])
@@ -420,9 +404,13 @@ class EmailSender:
                 return False, "Sender email address is not configured"
 
             msg_raw = msg.as_string()
-            print("=" * 60)
+            html_len = len(body_str) if is_html else 0
+            plain_len = len(self._html_to_plain_text(body_str)) if is_html else len(body_str)
+            unreplaced_placeholders = re.findall(r'\{\{\s*[\w\-]+\s*\}\}', body_str)
+
+            print("=" * 65)
             print("🚀 [Step 7] Sending email via SMTP:")
-            print(f"   Subject: {subject}")
+            print(f"   Subject: {subject_str}")
             print(f"   From: {from_name} <{sender_email}>")
             print(f"   To: {to_email}")
             print(f"   CC: {cc_emails}")
@@ -430,12 +418,16 @@ class EmailSender:
             print(f"   All SMTP Envelope Recipients: {recipients}")
             print(f"   Attachment count: {len(attachments) if attachments else 0}")
             print(f"   HTML mode: {is_html}")
-            print(f"   Custom Logo: {'Yes' if custom_logo else 'No (Default/None)'}")
-            print(f"   Content-Type: {msg.get_content_type()}")
-            print("--- MIME MESSAGE HEADERS ---")
-            for header_name, header_val in msg.items():
-                print(f"   {header_name}: {header_val}")
-            print("=" * 60)
+            print(f"   Rendered HTML Length: {html_len} chars")
+            print(f"   Plain Text Length: {plain_len} chars")
+            print(f"   Unreplaced Placeholders Count: {len(unreplaced_placeholders)}")
+            if unreplaced_placeholders:
+                print(f"   ⚠️ Warning: Found unreplaced placeholders: {unreplaced_placeholders}")
+            print(f"   Custom Logo: {'Yes' if custom_logo else 'None'}")
+            print(f"   Root Content-Type: {msg.get_content_type()}")
+            print("   --- MIME HIERARCHY TREE ---")
+            self._print_mime_tree(msg, indent=3)
+            print("=" * 65)
             
             # Retry loop
             last_err = None
@@ -473,6 +465,16 @@ class EmailSender:
             self.connected_account_email = None
             return False, err_msg
     
+    def _print_mime_tree(self, part, indent=0):
+        prefix = " " * indent
+        content_type = part.get_content_type()
+        cid = part.get('Content-ID', 'None')
+        disp = part.get('Content-Disposition', 'None')
+        print(f"{prefix}- Type: {content_type}, CID: {cid}, Disposition: {disp}")
+        if part.is_multipart():
+            for subpart in part.get_payload():
+                self._print_mime_tree(subpart, indent + 3)
+
     def send_bulk_emails(self, recipients, subject, body, from_name="Sender", cc_emails=None, bcc_emails=None, attachments=None, is_html=False, delay_between_emails=1, separate_threads=False, custom_logo=None):
         """
         Send emails to multiple recipients with rotation
@@ -491,15 +493,25 @@ class EmailSender:
         for index, recipient in enumerate(recipients, 1):
             if isinstance(recipient, dict):
                 to_email = recipient.get('email', '')
-                personalized_body = recipient.get('body', body)
+                personalized_body = recipient.get('body')
+                if personalized_body is None:
+                    personalized_body = body
+                base_subject = recipient.get('subject')
+                if base_subject is None:
+                    base_subject = subject
             else:
                 to_email = recipient
                 personalized_body = body
+                base_subject = subject
 
-            email_subject = subject
+            # Ensure valid strings
+            personalized_body = personalized_body if isinstance(personalized_body, str) else str(personalized_body or '')
+            base_subject = base_subject if isinstance(base_subject, str) else str(base_subject or '')
+
+            email_subject = base_subject
             if separate_threads:
                 thread_token = datetime.utcnow().strftime('%Y%m%d%H%M%S') + f"-{index:04d}"
-                email_subject = f"{subject} | Ref:{thread_token}"
+                email_subject = f"{base_subject} | Ref:{thread_token}"
             
             # Check rotation BEFORE every send
             if self.needs_rotation():
