@@ -337,17 +337,166 @@ def upload_file():
 @user_bp.route('/api/excel-files/<file_id>', methods=['GET'])
 @require_login
 def get_excel_file(file_id):
-    """Get single excel file with recipients"""
+    """Get single excel file with validated recipients"""
     file = ExcelFile.get_by_id(file_id)
     
     if not file:
         return jsonify({'error': 'File not found'}), 404
     
+    recipients = file.get('recipients', [])
+    validation_cache = {}
+    valid_count = 0
+    invalid_count = 0
+    
+    # Ensure every recipient has status and reason
+    for r in recipients:
+        email = str(r.get('email', '')).strip()
+        status = r.get('status')
+        reason = r.get('reason')
+        if not status or not reason:
+            if email in validation_cache:
+                is_valid, v_reason = validation_cache[email]
+            else:
+                is_valid, v_reason = validate_email(email)
+                validation_cache[email] = (is_valid, v_reason)
+            r['status'] = 'VALID' if is_valid else 'INVALID'
+            r['reason'] = v_reason or ('Mailbox exists' if is_valid else 'Invalid email')
+        
+        if str(r.get('status', '')).upper() == 'VALID':
+            valid_count += 1
+        else:
+            invalid_count += 1
+
     # Convert ObjectIds to string
     file['_id'] = str(file['_id'])
     file['user_id'] = str(file['user_id'])
+    file['recipients'] = recipients
     
-    return jsonify({'file': file})
+    total = len(recipients)
+    rate = round((valid_count / total * 100), 1) if total > 0 else 0
+
+    return jsonify({
+        'file': file,
+        'recipients': recipients,
+        'total_count': total,
+        'valid_count': valid_count,
+        'invalid_count': invalid_count,
+        'validation_rate': rate
+    })
+
+
+@user_bp.route('/api/validate-recipients', methods=['POST'])
+@require_login
+def validate_recipients_api():
+    """Live batch validation of recipients"""
+    try:
+        data = request.get_json(silent=True) or {}
+        input_recipients = data.get('recipients', [])
+        if not input_recipients and 'file_id' in data:
+            file = ExcelFile.get_by_id(data['file_id'])
+            if file:
+                input_recipients = file.get('recipients', [])
+
+        validated_recipients = []
+        validation_cache = {}
+        valid_count = 0
+        invalid_count = 0
+
+        for item in input_recipients:
+            if isinstance(item, str):
+                email = item.strip()
+                name = ''
+                institute = ''
+            elif isinstance(item, dict):
+                email = str(item.get('email', '')).strip()
+                name = str(item.get('name', '')).strip()
+                institute = str(item.get('institute', '')).strip()
+            else:
+                continue
+
+            if not email or email.lower() == 'nan':
+                continue
+
+            if email in validation_cache:
+                is_valid, reason = validation_cache[email]
+            else:
+                is_valid, reason = validate_email(email)
+                validation_cache[email] = (is_valid, reason)
+
+            rec = {
+                'email': email,
+                'name': name,
+                'institute': institute,
+                'status': 'VALID' if is_valid else 'INVALID',
+                'reason': reason or ('Mailbox exists' if is_valid else 'Invalid email')
+            }
+            if is_valid:
+                valid_count += 1
+            else:
+                invalid_count += 1
+            validated_recipients.append(rec)
+
+        total = len(validated_recipients)
+        rate = round((valid_count / total * 100), 1) if total > 0 else 0
+
+        return jsonify({
+            'success': True,
+            'recipients': validated_recipients,
+            'total_count': total,
+            'valid_count': valid_count,
+            'invalid_count': invalid_count,
+            'validation_rate': rate
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@user_bp.route('/api/export-recipients', methods=['POST'])
+@require_login
+def export_recipients_api():
+    """Export valid or invalid recipients as CSV or Excel"""
+    try:
+        data = request.get_json(silent=True) or {}
+        recipients = data.get('recipients', [])
+        status_filter = str(data.get('status', 'VALID')).upper()
+        export_format = str(data.get('format', 'csv')).lower()
+
+        filtered = [r for r in recipients if str(r.get('status', '')).upper() == status_filter]
+        if not filtered and not recipients:
+            return jsonify({'error': 'No recipients to export'}), 400
+
+        rows = []
+        for idx, r in enumerate(filtered, 1):
+            rows.append({
+                '#': idx,
+                'Email': r.get('email', ''),
+                'Name': r.get('name', ''),
+                'Institute': r.get('institute', ''),
+                'Status': r.get('status', ''),
+                'Reason': r.get('reason', '')
+            })
+
+        df = pd.DataFrame(rows)
+        output = io.BytesIO()
+        if export_format in ['xlsx', 'excel']:
+            filename = f"{status_filter.lower()}_recipients.xlsx"
+            mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name=f'{status_filter} Recipients')
+        else:
+            filename = f"{status_filter.lower()}_recipients.csv"
+            mimetype = 'text/csv'
+            df.to_csv(output, index=False)
+
+        output.seek(0)
+        return send_file(
+            output,
+            mimetype=mimetype,
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @user_bp.route('/api/excel-files/<file_id>', methods=['DELETE'])
