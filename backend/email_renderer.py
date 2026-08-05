@@ -182,16 +182,16 @@ def build_html_signature(signature_data=None, has_logo=False):
     contact_rows = []
     if company_phone:
         clean_phone = re.sub(r'[^\+0-9]', '', company_phone)
-        contact_rows.append(f'<span style="margin-right: 14px; display: inline-block;"><a href="tel:{clean_phone}" style="color: #4a5568; text-decoration: none; font-size: 13px;">📞 {html.escape(company_phone)}</a></span>')
+        contact_rows.append(f'<div style="margin-bottom: 4px;"><a href="tel:{clean_phone}" style="color: #4a5568; text-decoration: none; font-size: 13px;">📞 {html.escape(company_phone)}</a></div>')
     if company_email:
-        contact_rows.append(f'<span style="margin-right: 14px; display: inline-block;"><a href="mailto:{html.escape(company_email)}" style="color: #1a73e8; text-decoration: none; font-size: 13px;">✉️ {html.escape(company_email)}</a></span>')
+        contact_rows.append(f'<div style="margin-bottom: 4px;"><a href="mailto:{html.escape(company_email)}" style="color: #1a73e8; text-decoration: none; font-size: 13px;">✉️ {html.escape(company_email)}</a></div>')
     if company_website:
         web_url = company_website if company_website.startswith(('http://', 'https://')) else f'https://{company_website}'
         display_web = company_website.replace('https://', '').replace('http://', '')
-        contact_rows.append(f'<span style="display: inline-block;"><a href="{html.escape(web_url)}" target="_blank" style="color: #1a73e8; text-decoration: none; font-size: 13px;">🌐 {html.escape(display_web)}</a></span>')
+        contact_rows.append(f'<div style="margin-bottom: 4px;"><a href="{html.escape(web_url)}" target="_blank" style="color: #1a73e8; text-decoration: none; font-size: 13px;">🌐 {html.escape(display_web)}</a></div>')
 
     if contact_rows:
-        lines.append(f'  <div style="margin-bottom: 12px; font-size: 13px; color: #718096;">{" ".join(contact_rows)}</div>')
+        lines.append(f'  <div style="margin-bottom: 12px; font-size: 13px; color: #718096;">\n{"".join(contact_rows)}\n  </div>')
 
     # Inline logo embedded inside the signature block
     if has_logo:
@@ -340,14 +340,6 @@ def render_full_html_email(body_text_or_html, signature_data=None, has_logo=Fals
               
               <!-- Professional HTML Signature with Inline Logo -->
               {signature_html}
-            </td>
-          </tr>
-        </table>
-        <!-- Subtle Footer Note -->
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 620px; width: 100%; margin-top: 14px;">
-          <tr>
-            <td align="center" style="font-size: 12px; color: #a0aec0; padding: 4px;">
-              This email was delivered via automated messaging service.
             </td>
           </tr>
         </table>
