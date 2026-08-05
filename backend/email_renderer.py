@@ -325,27 +325,14 @@ def render_full_html_email(body_text_or_html, signature_data=None, has_logo=Fals
   </style>
   <![endif]-->
 </head>
-<body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%; color: #2d3748; line-height: 1.6;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f4f6f8; width: 100%; margin: 0; padding: 28px 12px;">
-    <tr>
-      <td align="center" valign="top">
-        <!-- Main Email Container Card -->
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 620px; width: 100%; background-color: #ffffff; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 10px rgba(0,0,0,0.04); overflow: hidden;">
-          <tr>
-            <td style="padding: 36px 32px 32px 32px;">
-              <!-- Email Body Content -->
-              <div style="font-size: 15px; line-height: 1.65; color: #2d3748;">
-                {body_html}
-              </div>
-              
-              <!-- Professional HTML Signature with Inline Logo -->
-              {signature_html}
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%; color: #2d3748; line-height: 1.6;">
+  <!-- Email Body Content -->
+  <div style="font-size: 15px; line-height: 1.65; color: #2d3748;">
+    {body_html}
+  </div>
+  
+  <!-- Professional HTML Signature with Inline Logo -->
+  {signature_html}
 </body>
 </html>"""
     return full_html
