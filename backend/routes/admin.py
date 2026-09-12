@@ -462,12 +462,12 @@ def get_all_logs():
 @admin_bp.route('/api/admin/cc-emails', methods=['GET'])
 @require_admin
 def get_cc_emails():
-    print("🔍 DEBUG API: /api/admin/cc-emails GET called")
+    print("[DEBUG] API: /api/admin/cc-emails GET called")
     from models import CcEmail
     
     cc_emails = CcEmail.get_all()
-    print(f"🔍 DEBUG API: CcEmail.get_all() returned {len(cc_emails)} items")
-    print(f"🔍 DEBUG API: First item: {cc_emails[0] if cc_emails else 'NONE'}")
+    print(f"[DEBUG] API: CcEmail.get_all() returned {len(cc_emails)} items")
+    print(f"[DEBUG] API: First item: {cc_emails[0] if cc_emails else 'NONE'}")
     
     safe_data = []
 

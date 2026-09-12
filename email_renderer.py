@@ -348,8 +348,8 @@ def save_debug_html(html_content, filepath=None):
     try:
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(html_content)
-        print(f"📄 Saved generated email HTML to: {filepath}")
+        print(f"[SUCCESS] Saved generated email HTML to: {filepath}")
         return filepath
     except Exception as e:
-        print(f"⚠️ Failed to save generated email HTML: {e}")
+        print(f"[WARNING] Failed to save generated email HTML: {e}")
         return None

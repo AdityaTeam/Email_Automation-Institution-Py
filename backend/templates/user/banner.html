@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Banner with Content — Under Development</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --primary-color: #4a90d9; --success-color: #28a745; --danger-color: #dc3545; --warning-color: #ffc107; }
+        body { background: #f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .sidebar { min-height: 100vh; background: white; box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1); }
+        .sidebar .nav-link { color: #333; padding: 12px 20px; border-radius: 8px; margin: 5px 10px; transition: all 0.3s; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background: var(--primary-color); color: white; }
+        .sidebar .nav-link i { margin-right: 10px; }
+        .main-content { padding: 30px; }
+        .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); margin-bottom: 20px; }
+        .card-header { background: white; border-bottom: 2px solid #f0f0f0; padding: 15px 20px; font-weight: 600; }
+        .user-info { padding: 15px 20px; border-bottom: 1px solid #eee; margin-bottom: 10px; }
+        .dev-alert { background: #fff3cd; border-left: 4px solid #ffc107; color: #856404; padding: 12px 20px; border-radius: 6px; margin-bottom: 20px; }
+        
+        /* Blogger-style Editor Styles */
+        .editor-container { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; min-height: 450px; }
+        .block-card { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin-bottom: 12px; position: relative; transition: all 0.2s; }
+        .block-card:hover { border-color: var(--primary-color); box-shadow: 0 2px 8px rgba(74,144,217,0.15); }
+        .block-toolbar { display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 6px 12px; border-radius: 6px; margin-bottom: 10px; border: 1px solid #f1f5f9; }
+        .block-type-badge { font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #475569; }
+        .palette-btn { border-radius: 20px; font-size: 0.85rem; font-weight: 600; padding: 6px 16px; margin-right: 6px; margin-bottom: 6px; }
+        
+        /* Live Canvas Preview */
+        .preview-canvas { background: #ffffff; border: 2px dashed #cbd5e1; border-radius: 10px; padding: 20px; width: 100%; max-width: 650px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .rendered-banner-img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-2 sidebar">
+                <div class="user-info">
+                    <i class="fas fa-user-circle me-2"></i>
+                    <strong>{{ username }}</strong>
+                </div>
+                <nav class="nav flex-column">
+                    <a class="nav-link" href="/dashboard"><i class="fas fa-home"></i> Dashboard</a>
+                    <a class="nav-link" href="/email-ids"><i class="fas fa-envelope"></i> Email IDs</a>
+                    <a class="nav-link" href="/uploads"><i class="fas fa-upload"></i> Uploads</a>
+                    <a class="nav-link" href="/compose"><i class="fas fa-pen"></i> Compose</a>
+                    <a class="nav-link" href="/newsletter">
+                        <i class="fas fa-newspaper"></i> Newsletter <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">Dev</span>
+                    </a>
+                    <a class="nav-link active" href="/banner-builder">
+                        <i class="fas fa-image"></i> Banner with Content <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">Dev</span>
+                    </a>
+                    <a class="nav-link" href="/logs"><i class="fas fa-history"></i> Logs</a>
+                    <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                </nav>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-md-10 main-content">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2><i class="fas fa-image text-primary me-2"></i> Banner with Content (Blogger Editor)</h2>
+                    <span class="badge bg-warning text-dark px-3 py-2 fs-6"><i class="fas fa-code me-1"></i> Feature Under Development</span>
+                </div>
+
+                <div class="dev-alert">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>Core Requirement:</strong> Content blocks (Images, Text, Headings, Dividers, Buttons) are rendered into a <strong>single final visual composite image</strong> by the Python Pillow backend before email dispatch.
+                </div>
+
+                <!-- Action Bar & Palette -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-7">
+                                <span class="fw-bold me-2"><i class="fas fa-plus-circle text-primary"></i> Add Content Block:</span>
+                                <button class="btn btn-outline-primary palette-btn" onclick="addBlock('heading')"><i class="fas fa-heading me-1"></i> Heading</button>
+                                <button class="btn btn-outline-success palette-btn" onclick="addBlock('image')"><i class="fas fa-image me-1"></i> Image</button>
+                                <button class="btn btn-outline-info palette-btn" onclick="addBlock('text')"><i class="fas fa-paragraph me-1"></i> Text</button>
+                                <button class="btn btn-outline-dark palette-btn" onclick="addBlock('image_text')"><i class="fas fa-columns me-1"></i> Image + Text</button>
+                                <button class="btn btn-outline-secondary palette-btn" onclick="addBlock('divider')"><i class="fas fa-minus me-1"></i> Divider</button>
+                                <button class="btn btn-outline-warning palette-btn" onclick="addBlock('button')"><i class="fas fa-link me-1"></i> Button</button>
+                            </div>
+                            <div class="col-md-5 text-end">
+                                <button class="btn btn-outline-secondary me-2" onclick="openSavedBannersModal()"><i class="fas fa-folder-open me-1"></i> Saved Banners</button>
+                                <button class="btn btn-primary" onclick="renderSingleImage()"><i class="fas fa-magic me-1"></i> Render Final Image</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <!-- Block Editor Canvas -->
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-cubes text-primary me-2"></i> Blogger Post Block Canvas</span>
+                                <small class="text-muted" id="blockCountText">0 blocks</small>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">Banner Campaign Title</label>
+                                    <input type="text" class="form-control" id="bannerTitle" placeholder="e.g., August Product Showcase Banner">
+                                </div>
+                                <div id="blocksContainer" class="editor-container">
+                                    <div class="text-center py-5 text-muted" id="emptyCanvasNotice">
+                                        <i class="fas fa-layer-group fa-3x mb-3 text-secondary"></i>
+                                        <h5>Your canvas is empty</h5>
+                                        <p class="small">Click any block button above (Heading, Image, Text) to start building!</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Live Preview & Rendered Image Card -->
+                    <div class="col-md-6">
+                        <!-- Rendered Output Image View -->
+                        <div class="card mb-3 d-none" id="renderedResultCard">
+                            <div class="card-header bg-success text-white">
+                                <i class="fas fa-check-circle me-2"></i> Single Rendered Visual Image Output
+                            </div>
+                            <div class="card-body text-center">
+                                <p class="small text-muted mb-2">This is the final composite PNG image generated by the backend Pillow engine for the recipient email:</p>
+                                <img id="renderedBannerImg" class="rendered-banner-img mb-3" src="" alt="Rendered Banner">
+                                <div>
+                                    <a id="downloadBannerBtn" href="#" target="_blank" class="btn btn-sm btn-outline-secondary me-2"><i class="fas fa-download me-1"></i> View Full Image</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Email Sending Setup -->
+                        <div class="card">
+                            <div class="card-header"><i class="fas fa-paper-plane text-primary me-2"></i> Email Dispatch & Recipients</div>
+                            <div class="card-body">
+                                <form id="bannerSendForm">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Email Subject Line</label>
+                                        <input type="text" class="form-control" id="emailSubject" required placeholder="e.g., Special Announcement for {{institute}}">
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Select Sender Email Account</label>
+                                        <select class="form-select" id="senderEmailSelect" required>
+                                            <option value="">-- Choose Sender Email --</option>
+                                            {% for eid in email_ids %}
+                                            <option value="{{ eid._id }}">{{ eid.email }} (Sent: {{ eid.emails_sent }}/25)</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Select Recipient File</label>
+                                        <select class="form-select" id="recipientFileSelect" onchange="onBannerRecipientFileChange()" required>
+                                            <option value="">-- Choose Recipient File --</option>
+                                            {% for file in excel_files %}
+                                            <option value="{{ file._id }}">{{ file.original_filename }} ({{ file.recipient_count }} recipients)</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+
+                                    <!-- Isolated Recipient Validation Card -->
+                                    <div id="validationResultCard" class="card mb-3 shadow-sm border-0 d-none" style="background-color: #f8fafc;">
+                                        <div class="card-body p-2">
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <span class="fw-bold small text-dark"><i class="fas fa-user-check text-success me-1"></i> Validation Results</span>
+                                                <span class="badge bg-info text-dark" id="valRateBadge">Rate: 0%</span>
+                                            </div>
+                                            <div class="d-flex flex-wrap gap-1 mb-2">
+                                                <span class="badge bg-secondary" id="valTotalBadge">Total: 0</span>
+                                                <span class="badge bg-success" id="valValidBadge">Valid: 0</span>
+                                                <span class="badge bg-danger" id="valInvalidBadge">Invalid: 0</span>
+                                                <span class="badge bg-warning text-dark" id="valUnknownBadge">Unknown: 0</span>
+                                            </div>
+                                            <div id="valTableContainer" style="max-height: 140px; overflow-y: auto;" class="border rounded bg-white">
+                                                <table class="table table-sm table-hover mb-0" style="font-size: 11px;">
+                                                    <thead class="table-light sticky-top">
+                                                        <tr>
+                                                            <th>Email</th>
+                                                            <th>Status</th>
+                                                            <th>Reason</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="valTableBody"></tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="d-grid gap-2">
+                                        <button type="button" class="btn btn-outline-primary" onclick="saveBannerDesign()"><i class="fas fa-save me-1"></i> Save Banner Design</button>
+                                        <button type="submit" class="btn btn-success py-2 fw-bold" id="sendBannerBtn"><i class="fas fa-paper-plane me-1"></i> Send Banner Email</button>
+                                    </div>
+                                </form>
+                                <div id="sendResultStatus" class="mt-3"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Saved Banners Modal -->
+    <div class="modal fade" id="savedBannersModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-folder-open text-primary me-2"></i> Saved Banner Designs</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-3" id="savedBannersList">
+                    <div class="text-center py-4"><i class="fas fa-spinner fa-spin me-2"></i> Loading saved designs...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let blocks = [];
+        let activeBannerId = null;
+        let currentRenderedUrl = '';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Default block setup: Image + Text
+            addBlock('heading', 'Welcome to Our Latest Campaign!');
+            addBlock('text', 'Discover our new products, exclusive offers, and campus highlights designed especially for you.');
+            addBlock('divider');
+            addBlock('button', 'Explore More');
+        });
+
+        function renderBlocksCanvas() {
+            const container = document.getElementById('blocksContainer');
+            document.getElementById('blockCountText').innerText = blocks.length + ' blocks';
+
+            if (blocks.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-5 text-muted" id="emptyCanvasNotice">
+                        <i class="fas fa-layer-group fa-3x mb-3 text-secondary"></i>
+                        <h5>Your canvas is empty</h5>
+                        <p class="small">Click any block button above (Heading, Image, Text) to start building!</p>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = blocks.map((b, index) => {
+                return `
+                <div class="block-card" id="${b.id}">
+                    <div class="block-toolbar">
+                        <span class="block-type-badge"><i class="fas ${getBlockIcon(b.type)} me-1"></i> ${b.type} block</span>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-light btn-sm" onclick="moveBlock(${index}, -1)" ${index === 0 ? 'disabled' : ''}><i class="fas fa-arrow-up"></i></button>
+                            <button class="btn btn-light btn-sm" onclick="moveBlock(${index}, 1)" ${index === blocks.length - 1 ? 'disabled' : ''}><i class="fas fa-arrow-down"></i></button>
+                            <button class="btn btn-light btn-sm text-danger" onclick="deleteBlock('${b.id}')"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </div>
+                    ${getBlockFieldsHtml(b, index)}
+                </div>`;
+            }).join('');
+        }
+
+        function getBlockIcon(type) {
+            switch(type) {
+                case 'heading': return 'fa-heading';
+                case 'image': return 'fa-image';
+                case 'text': return 'fa-paragraph';
+                case 'image_text': return 'fa-columns';
+                case 'divider': return 'fa-minus';
+                case 'button': return 'fa-link';
+                default: return 'fa-cube';
+            }
+        }
+
+        function getBlockFieldsHtml(b, index) {
+            const alignVal = (b.align || 'left').toLowerCase();
+
+            if (b.type === 'heading') {
+                return `
+                <div class="row g-2 align-items-center">
+                    <div class="col-md-5">
+                        <input type="text" class="form-control form-control-sm" value="${escapeHtml(b.content)}" oninput="updateBlock('${b.id}', 'content', this.value, false)" placeholder="Heading text...">
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select form-select-sm" onchange="updateBlock('${b.id}', 'size', this.value)">
+                            <option value="h1" ${b.size === 'h1' ? 'selected' : ''}>H1 (Large)</option>
+                            <option value="h2" ${b.size === 'h2' ? 'selected' : ''}>H2 (Medium)</option>
+                            <option value="h3" ${b.size === 'h3' ? 'selected' : ''}>H3 (Small)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <div class="btn-group btn-group-sm w-100" role="group">
+                            <button type="button" class="btn ${alignVal === 'left' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'left')" title="Align Left"><i class="fas fa-align-left"></i> Left</button>
+                            <button type="button" class="btn ${alignVal === 'center' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'center')" title="Align Center"><i class="fas fa-align-center"></i> Center</button>
+                            <button type="button" class="btn ${alignVal === 'right' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'right')" title="Align Right"><i class="fas fa-align-right"></i> Right</button>
+                        </div>
+                    </div>
+                </div>`;
+            } else if (b.type === 'text') {
+                return `
+                <div class="mb-2">
+                    <textarea class="form-control form-control-sm" rows="3" oninput="updateBlock('${b.id}', 'content', this.value, false)" placeholder="Enter paragraph text...">${escapeHtml(b.content)}</textarea>
+                </div>
+                <div class="d-flex align-items-center justify-content-end">
+                    <small class="text-muted me-2 fw-bold">Alignment:</small>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn ${alignVal === 'left' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'left')" title="Align Left"><i class="fas fa-align-left"></i> Left</button>
+                        <button type="button" class="btn ${alignVal === 'center' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'center')" title="Align Center"><i class="fas fa-align-center"></i> Center</button>
+                        <button type="button" class="btn ${alignVal === 'right' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'right')" title="Align Right"><i class="fas fa-align-right"></i> Right</button>
+                    </div>
+                </div>`;
+            } else if (b.type === 'image') {
+                const alignCss = alignVal === 'center' ? 'center' : (alignVal === 'right' ? 'end' : 'start');
+                return `
+                <div>
+                    ${b.source ? `<div class="mb-2 text-${alignCss}"><img src="${b.source}" style="max-height: 120px;" class="img-thumbnail"></div>` : ''}
+                    <div class="row g-2 align-items-center">
+                        <div class="col-md-8">
+                            <div class="input-group input-group-sm">
+                                <input type="text" class="form-control" value="${escapeHtml(b.source)}" oninput="updateBlock('${b.id}', 'source', this.value, false)" placeholder="Image URL or upload file...">
+                                <label class="btn btn-outline-secondary">
+                                    <i class="fas fa-upload me-1"></i> Upload <input type="file" hidden accept="image/*" onchange="uploadImageForBlock('${b.id}', this)">
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <div class="btn-group btn-group-sm w-100" role="group">
+                                <button type="button" class="btn ${alignVal === 'left' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'left')" title="Align Left"><i class="fas fa-align-left"></i> Left</button>
+                                <button type="button" class="btn ${alignVal === 'center' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'center')" title="Align Center"><i class="fas fa-align-center"></i> Center</button>
+                                <button type="button" class="btn ${alignVal === 'right' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'right')" title="Align Right"><i class="fas fa-align-right"></i> Right</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            } else if (b.type === 'image_text') {
+                const layoutVal = (b.layout || 'image_left').toLowerCase();
+                return `
+                <div class="row g-2 mb-2">
+                    <div class="col-md-6">
+                        <label class="form-label small fw-bold mb-1"><i class="fas fa-columns text-primary me-1"></i> Layout Side</label>
+                        <select class="form-select form-select-sm" onchange="updateBlock('${b.id}', 'layout', this.value)">
+                            <option value="image_left" ${layoutVal === 'image_left' ? 'selected' : ''}>Image Left + Text Right</option>
+                            <option value="image_right" ${layoutVal === 'image_right' ? 'selected' : ''}>Text Left + Image Right</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 text-end">
+                        <label class="form-label small fw-bold mb-1 d-block">Text Alignment</label>
+                        <div class="btn-group btn-group-sm w-100" role="group">
+                            <button type="button" class="btn ${alignVal === 'left' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'left')" title="Align Left"><i class="fas fa-align-left"></i> Left</button>
+                            <button type="button" class="btn ${alignVal === 'center' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'center')" title="Align Center"><i class="fas fa-align-center"></i> Center</button>
+                            <button type="button" class="btn ${alignVal === 'right' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'right')" title="Align Right"><i class="fas fa-align-right"></i> Right</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        ${b.source ? `<div class="mb-1"><img src="${b.source}" style="max-height: 80px;" class="img-thumbnail"></div>` : ''}
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control" value="${escapeHtml(b.source || '')}" oninput="updateBlock('${b.id}', 'source', this.value, false)" placeholder="Image URL or upload file...">
+                            <label class="btn btn-outline-secondary">
+                                <i class="fas fa-upload me-1"></i> Upload <input type="file" hidden accept="image/*" onchange="uploadImageForBlock('${b.id}', this)">
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <textarea class="form-control form-control-sm" rows="3" oninput="updateBlock('${b.id}', 'content', this.value, false)" placeholder="Enter side text content...">${escapeHtml(b.content || '')}</textarea>
+                    </div>
+                </div>`;
+            } else if (b.type === 'divider') {
+                return `<hr class="my-2" style="border-top: 2px solid ${b.color || '#cccccc'};">`;
+            } else if (b.type === 'button') {
+                return `
+                <div class="row g-2 align-items-center">
+                    <div class="col-md-4">
+                        <input type="text" class="form-control form-control-sm" value="${escapeHtml(b.content)}" oninput="updateBlock('${b.id}', 'content', this.value, false)" placeholder="Button Label">
+                    </div>
+                    <div class="col-md-4">
+                        <input type="text" class="form-control form-control-sm" value="${escapeHtml(b.url || '')}" oninput="updateBlock('${b.id}', 'url', this.value, false)" placeholder="https://target-link.com">
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <div class="btn-group btn-group-sm w-100" role="group">
+                            <button type="button" class="btn ${alignVal === 'left' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'left')" title="Align Left"><i class="fas fa-align-left"></i> Left</button>
+                            <button type="button" class="btn ${alignVal === 'center' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'center')" title="Align Center"><i class="fas fa-align-center"></i> Center</button>
+                            <button type="button" class="btn ${alignVal === 'right' ? 'btn-primary' : 'btn-outline-secondary'}" onclick="updateBlock('${b.id}', 'align', 'right')" title="Align Right"><i class="fas fa-align-right"></i> Right</button>
+                        </div>
+                    </div>
+                </div>`;
+            }
+            return '';
+        }
+
+        function addBlock(type, defaultContent = '') {
+            const id = 'block_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+            const newBlock = { id, type, content: defaultContent, align: 'left' };
+            if (type === 'heading') newBlock.size = 'h1';
+            if (type === 'divider') newBlock.color = '#cccccc';
+            if (type === 'button') { newBlock.content = defaultContent || 'Click Here'; newBlock.bgColor = '#1a73e8'; newBlock.textColor = '#ffffff'; }
+            if (type === 'image_text') { newBlock.layout = 'image_left'; newBlock.content = defaultContent || 'Side text content alongside image...'; }
+            blocks.push(newBlock);
+            renderBlocksCanvas();
+        }
+
+        function updateBlock(id, key, val, redraw = true) {
+            const b = blocks.find(x => x.id === id);
+            if (b) {
+                b[key] = val;
+                if (redraw) {
+                    renderBlocksCanvas();
+                }
+            }
+        }
+
+        function syncBlocksFromDOM() {
+            blocks.forEach(b => {
+                const cardEl = document.getElementById(b.id) || document.getElementById('block_' + b.id) || document.getElementById('block_' + b.id.replace('block_', ''));
+                if (cardEl) {
+                    const textInputs = cardEl.querySelectorAll('input[type="text"], textarea');
+                    textInputs.forEach(inp => {
+                        const placeholder = (inp.placeholder || '').toLowerCase();
+                        const val = inp.value;
+                        if (placeholder.includes('heading') || placeholder.includes('paragraph') || placeholder.includes('side text') || placeholder.includes('label')) {
+                            if (val !== undefined && val !== null && val !== '') b.content = val;
+                        } else if (placeholder.includes('image url')) {
+                            if (val !== undefined && val !== null && val.trim() !== '') b.source = val;
+                        } else if (placeholder.includes('target-link')) {
+                            if (val !== undefined && val !== null && val.trim() !== '') b.url = val;
+                        }
+                    });
+
+                    const selects = cardEl.querySelectorAll('select');
+                    selects.forEach(sel => {
+                        if (sel.options && sel.options.length) {
+                            const val = sel.value;
+                            if (val === 'h1' || val === 'h2' || val === 'h3') {
+                                b.size = val;
+                            } else if (val === 'image_left' || val === 'image_right') {
+                                b.layout = val;
+                            }
+                        }
+                    });
+                }
+
+                // Ensure alias keys are present for backend compatibility
+                b.text = b.content || b.text || '';
+                b.image = b.source || b.image || '';
+                b.text_align = b.align || b.text_align || 'left';
+            });
+            console.log("[BANNER DEBUG 1] syncBlocksFromDOM complete. Synced blocks:", JSON.parse(JSON.stringify(blocks)));
+        }
+
+        function moveBlock(index, direction) {
+            syncBlocksFromDOM();
+            const newIndex = index + direction;
+            if (newIndex < 0 || newIndex >= blocks.length) return;
+            const temp = blocks[index];
+            blocks[index] = blocks[newIndex];
+            blocks[newIndex] = temp;
+            renderBlocksCanvas();
+        }
+
+        function deleteBlock(id) {
+            syncBlocksFromDOM();
+            blocks = blocks.filter(x => x.id !== id);
+            renderBlocksCanvas();
+        }
+
+        async function uploadImageForBlock(blockId, input) {
+            if (!input.files || !input.files[0]) return;
+            const formData = new FormData();
+            formData.append('image', input.files[0]);
+
+            try {
+                const res = await fetch('/api/banners/upload-image', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    updateBlock(blockId, 'source', data.url);
+                } else {
+                    alert('Upload failed: ' + data.error);
+                }
+            } catch (e) {
+                alert('Upload error: ' + e);
+            }
+        }
+
+        function escapeHtml(str) {
+            return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        async function renderSingleImage() {
+            syncBlocksFromDOM();
+            if (!blocks || blocks.length === 0) {
+                alert('Canvas is empty. Add blocks before rendering.');
+                return;
+            }
+
+            const title = document.getElementById('bannerTitle').value.trim() || 'Banner Campaign';
+            console.log("[BANNER DEBUG PAYLOAD] Sending blocks to /api/banners/render-image:", JSON.stringify({ id: activeBannerId, title, blocks }, null, 2));
+            
+            try {
+                const res = await fetch('/api/banners/render-image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: activeBannerId, title, blocks })
+                });
+                const data = await res.json();
+                console.log("[BANNER DEBUG RESPONSE] Received render response:", data);
+
+                if (data.success) {
+                    currentRenderedUrl = data.image_url;
+                    document.getElementById('renderedBannerImg').src = data.image_url + '?t=' + Date.now();
+                    document.getElementById('downloadBannerBtn').href = data.image_url;
+                    document.getElementById('renderedResultCard').classList.remove('d-none');
+                } else {
+                    alert('Render failed: ' + data.error);
+                }
+            } catch (e) {
+                alert('Rendering error: ' + e);
+            }
+        }
+
+        async function saveBannerDesign() {
+            syncBlocksFromDOM();
+            const title = document.getElementById('bannerTitle').value.trim();
+            if (!title) {
+                alert('Please enter a banner campaign title.');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/banners', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: activeBannerId, title, blocks })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    activeBannerId = data.id;
+                    alert('Banner design saved successfully!');
+                } else {
+                    alert('Save failed: ' + data.error);
+                }
+            } catch (e) {
+                alert('Save error: ' + e);
+            }
+        }
+
+        async function openSavedBannersModal() {
+            const modalEl = document.getElementById('savedBannersModal');
+            const listEl = document.getElementById('savedBannersList');
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+
+            try {
+                const res = await fetch('/api/banners');
+                const data = await res.json();
+                if (data.success) {
+                    const items = data.banners || [];
+                    if (!items.length) {
+                        listEl.innerHTML = '<div class="text-center py-4 text-muted">No saved banner designs found.</div>';
+                        return;
+                    }
+                    listEl.innerHTML = items.map(b => `
+                        <div class="d-flex justify-content-between align-items-center p-3 border-bottom">
+                            <div>
+                                <strong class="d-block text-dark">${escapeHtml(b.title)}</strong>
+                                <small class="text-muted">${b.blocks ? b.blocks.length : 0} blocks</small>
+                            </div>
+                            <div>
+                                <button class="btn btn-sm btn-outline-primary me-1" onclick="loadSavedBanner('${b._id}')">Load</button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteSavedBanner('${b._id}')">Delete</button>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (e) {
+                listEl.innerHTML = '<div class="text-danger">Failed to load saved designs.</div>';
+            }
+        }
+
+        async function loadSavedBanner(id) {
+            try {
+                const res = await fetch('/api/banners/' + id);
+                const data = await res.json();
+                if (data.success) {
+                    const b = data.banner;
+                    activeBannerId = b._id;
+                    document.getElementById('bannerTitle').value = b.title || '';
+                    blocks = b.blocks || [];
+                    renderBlocksCanvas();
+                    bootstrap.Modal.getInstance(document.getElementById('savedBannersModal')).hide();
+                }
+            } catch (e) {
+                alert('Error loading banner: ' + e);
+            }
+        }
+
+        async function deleteSavedBanner(id) {
+            if (!confirm('Delete this saved banner design?')) return;
+            try {
+                const res = await fetch('/api/banners/' + id, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    openSavedBannersModal();
+                }
+            } catch (e) {
+                alert('Error deleting: ' + e);
+            }
+        }
+
+        let validatedBannerRecipients = [];
+        let valAbortController = null;
+
+        async function onBannerRecipientFileChange() {
+            if (valAbortController) {
+                valAbortController.abort();
+            }
+            valAbortController = new AbortController();
+
+            const fileId = document.getElementById('recipientFileSelect').value;
+            const cardEl = document.getElementById('validationResultCard');
+            const totalEl = document.getElementById('valTotalBadge');
+            const validEl = document.getElementById('valValidBadge');
+            const invalidEl = document.getElementById('valInvalidBadge');
+            const unkBadge = document.getElementById('valUnknownBadge');
+            const rateEl = document.getElementById('valRateBadge');
+            const tbody = document.getElementById('valTableBody');
+            const sendBtn = document.getElementById('sendBannerBtn');
+
+            // Reset badges immediately
+            totalEl.innerText = 'Total: 0';
+            validEl.innerText = 'Valid: 0';
+            invalidEl.innerText = 'Invalid: 0';
+            if (unkBadge) unkBadge.innerText = 'Unknown: 0';
+            rateEl.innerText = 'Rate: 0%';
+
+            if (!fileId) {
+                cardEl.classList.add('d-none');
+                validatedBannerRecipients = [];
+                return;
+            }
+
+            cardEl.classList.remove('d-none');
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center py-2 text-muted"><i class="fas fa-spinner fa-spin me-1"></i> Validating recipient emails...</td></tr>';
+            sendBtn.disabled = true;
+
+            try {
+                const res = await fetch('/api/banners/validate-recipients', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_id: fileId }),
+                    signal: valAbortController.signal
+                });
+
+                let data;
+                const contentType = res.headers.get('content-type') || '';
+                const rawText = await res.text();
+
+                if (contentType.includes('text/html') || rawText.trim().startsWith('<')) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="text-danger py-2">Validation API returned HTML error (${res.status}). Server path or route misconfigured.</td></tr>`;
+                    return;
+                }
+
+                try {
+                    data = JSON.parse(rawText);
+                } catch (jsonErr) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="text-danger py-2">Invalid JSON from validation API (${res.status}): ${escapeHtml(rawText.substring(0, 150))}</td></tr>`;
+                    return;
+                }
+
+                if (!data.success) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="text-danger py-2">Validation error: ${escapeHtml(data.error || 'Failed')}</td></tr>`;
+                    return;
+                }
+
+                const totalVal = data.total !== undefined ? data.total : data.total_count;
+                const validVal = data.valid !== undefined ? data.valid : data.valid_count;
+                const invalidVal = data.invalid !== undefined ? data.invalid : data.invalid_count;
+                const unknownVal = data.unknown !== undefined ? data.unknown : (data.unknown_count || 0);
+                const rateVal = data.rate !== undefined ? data.rate : data.validation_rate;
+
+                totalEl.innerText = `Total: ${totalVal}`;
+                validEl.innerText = `Valid: ${validVal}`;
+                invalidEl.innerText = `Invalid: ${invalidVal}`;
+                const unkBadge = document.getElementById('valUnknownBadge');
+                if (unkBadge) unkBadge.innerText = `Unknown: ${unknownVal}`;
+                rateEl.innerText = `Rate: ${rateVal}%`;
+
+                validatedBannerRecipients = data.valid_recipients || [];
+
+                if (data.recipients && data.recipients.length) {
+                    tbody.innerHTML = data.recipients.map(r => {
+                        let badgeClass = 'bg-secondary';
+                        if (r.status === 'VALID') badgeClass = 'bg-success';
+                        else if (r.status === 'INVALID') badgeClass = 'bg-danger';
+                        else if (r.status === 'UNKNOWN') badgeClass = 'bg-warning text-dark';
+
+                        return `
+                        <tr>
+                            <td class="text-truncate" style="max-width: 130px;">${escapeHtml(r.email)}</td>
+                            <td>
+                                <span class="badge ${badgeClass}">${r.status}</span>
+                            </td>
+                            <td class="text-truncate small text-muted" style="max-width: 110px;">${escapeHtml(r.reason)}</td>
+                        </tr>`;
+                    }).join('');
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="3" class="text-center py-2 text-muted">No recipients found</td></tr>';
+                }
+
+                if (validVal > 0) {
+                    sendBtn.disabled = false;
+                } else {
+                    sendBtn.disabled = true;
+                    alert('Selected file contains 0 valid recipient email addresses.');
+                }
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="3" class="text-danger py-2">Validation exception: ${escapeHtml(err.message || err)}</td></tr>`;
+            }
+        }
+
+        document.getElementById('bannerSendForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            syncBlocksFromDOM();
+            const subject = document.getElementById('emailSubject').value.trim();
+            const senderId = document.getElementById('senderEmailSelect').value;
+            const fileId = document.getElementById('recipientFileSelect').value;
+            const sendBtn = document.getElementById('sendBannerBtn');
+            const statusEl = document.getElementById('sendResultStatus');
+
+            if (!senderId || !fileId || !subject) {
+                alert('Please fill out subject, sender account, and recipient file.');
+                return;
+            }
+
+            // If recipients haven't been validated yet, run validation
+            if (!validatedBannerRecipients.length) {
+                await onBannerRecipientFileChange();
+            }
+
+            if (!validatedBannerRecipients.length) {
+                alert('No valid recipient email addresses available in selected file.');
+                return;
+            }
+
+            // Always force a fresh composite image render before sending
+            statusEl.innerHTML = '<div class="text-primary"><i class="fas fa-magic fa-spin me-2"></i> Rendering single composite PNG banner image...</div>';
+            await renderSingleImage();
+
+            if (!currentRenderedUrl) {
+                statusEl.innerHTML = '<div class="text-danger"><i class="fas fa-times-circle me-2"></i> Image rendering failed. Please try rendering again.</div>';
+                return;
+            }
+
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Dispatching Banner Email...';
+            statusEl.innerHTML = '<div class="text-primary"><i class="fas fa-cog fa-spin me-2"></i> Sending banner email to valid recipients...</div>';
+
+            try {
+                // Send via Banner API (submitting only validated recipients list)
+                const sendRes = await fetch('/api/banners/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sender_email_id: senderId,
+                        subject: subject,
+                        blocks: blocks,
+                        image_url: currentRenderedUrl,
+                        recipients: validatedBannerRecipients
+                    })
+                });
+
+                let result;
+                const contentType = sendRes.headers.get('content-type') || '';
+                const responseText = await sendRes.text();
+
+                if (contentType.includes('text/html') || responseText.trim().startsWith('<')) {
+                    statusEl.innerHTML = `<div class="alert alert-danger mt-2">Server Error (${sendRes.status}): Endpoint returned unexpected HTML instead of JSON.</div>`;
+                    return;
+                }
+
+                try {
+                    result = JSON.parse(responseText);
+                } catch (jsonErr) {
+                    statusEl.innerHTML = `<div class="alert alert-danger mt-2">Server Error (${sendRes.status}): ${escapeHtml(responseText.substring(0, 300))}</div>`;
+                    return;
+                }
+
+                if (result.success) {
+                    statusEl.innerHTML = `
+                        <div class="alert alert-success mt-2">
+                            <h6><i class="fas fa-check-circle me-2"></i> Banner Email Campaign Dispatched!</h6>
+                            <p class="mb-0">Valid Recipients: <strong>${result.valid_recipients || result.sent}</strong> | Sent: <strong>${result.sent}</strong> | Failed: <strong>${result.failed}</strong></p>
+                        </div>`;
+                } else {
+                    statusEl.innerHTML = `<div class="alert alert-danger mt-2">Error sending: ${escapeHtml(result.error || 'Unknown error')}</div>`;
+                }
+            } catch (err) {
+                statusEl.innerHTML = `<div class="alert alert-danger mt-2">Exception: ${escapeHtml(err.message || err)}</div>`;
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '<i class="fas fa-paper-plane me-1"></i> Send Banner Email';
+            }
+        });
+    </script>
+</body>
+</html>

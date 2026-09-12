@@ -3,21 +3,20 @@ User Panel Routes - Backup
 Handles user dashboard, email management, and email sending
 """
 
-from smtp_validator import validate_email
-from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, send_file
 from models import EmailID, ExcelFile, Template, Requirement, EmailLog
 from database import MongoDB, Collections
 from bson import ObjectId
 import os
 import re
 import json
+import io
 import mimetypes
 import traceback
 import pandas as pd
 from werkzeug.utils import secure_filename
 from email_sender import EmailSender
-from flask import send_file
-from models import RepositoryCategory, RepositoryFile
+from smtp_validator import validate_email
 
 user_bp = Blueprint('user', __name__)
 
@@ -166,121 +165,78 @@ def uploads():
 @user_bp.route('/api/upload', methods=['POST'])
 @require_login
 def upload_file():
-
+    """Upload and process Excel/CSV with recipient validation"""
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
-
+    
     file = request.files['file']
-
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
-
+    
     filename = secure_filename(file.filename)
-
-    os.makedirs('uploads', exist_ok=True)
-
     filepath = os.path.join('uploads', filename)
-
+    os.makedirs('uploads', exist_ok=True)
     file.save(filepath)
-
+    
     try:
-
-        if filename.endswith(('.xlsx', '.xls')):
-
-            df = pd.read_excel(
-                filepath,
-                usecols=lambda x: x.lower().strip() in [
-                    'email',
-                    'name',
-                    'institute'
-                ],
-                dtype=str,
-                engine='openpyxl',
-                na_filter=False
-            )
-
+        if filename.endswith('.csv'):
+            df = pd.read_csv(filepath, dtype=str, keep_default_na=False)
+        elif filename.endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(filepath, dtype=str, keep_default_na=False)
         else:
-
             os.remove(filepath)
-
-            return jsonify({
-                'error': 'Only Excel files allowed'
-            }), 400
-
+            return jsonify({'error': 'Invalid format. Use CSV or Excel'}), 400
+        
         df.columns = [str(col).strip() for col in df.columns]
-
+        
         email_col = None
-
         for col in df.columns:
-
             if col.lower() == 'email':
                 email_col = col
                 break
-
+        
         if not email_col:
-
             os.remove(filepath)
-
-            return jsonify({
-                'error': 'Email column not found'
-            }), 400
-
+            return jsonify({'error': 'Missing Email column'}), 400
+        
         name_col = None
         institute_col = None
-
         for col in df.columns:
-
             if col.lower() == 'name':
                 name_col = col
-
             if col.lower() == 'institute':
                 institute_col = col
-
+        
         recipients = []
-
+        validation_cache = {}
         valid_count = 0
         invalid_count = 0
 
-        validation_cache = {}
-
-        rows = df.to_dict(orient='records')
-
-        for row in rows:
-
-            email = str(row.get(email_col, '')).strip()
-
+        for _, row in df.iterrows():
+            email = str(row[email_col]).strip() if email_col in row else ''
             if not email or email.lower() == 'nan':
                 continue
-
+            
             if email in validation_cache:
-
                 is_valid, reason = validation_cache[email]
-
             else:
-
                 is_valid, reason = validate_email(email)
-
                 validation_cache[email] = (is_valid, reason)
 
             recipient = {
                 'email': email,
+                'name': str(row[name_col]).strip() if name_col and name_col in row and str(row[name_col]).lower() != 'nan' else '',
+                'institute': str(row[institute_col]).strip() if institute_col and institute_col in row and str(row[institute_col]).lower() != 'nan' else '',
                 'status': 'VALID' if is_valid else 'INVALID',
-                'reason': reason,
-                'name': '',
-                'institute': ''
+                'reason': reason or ('Mailbox exists' if is_valid else 'Invalid email')
             }
-
-            if name_col:
-
-                recipient['name'] = str(
-                    row.get(name_col, '')
-                ).strip()
-
-            if institute_col:
-
-                recipient['institute'] = str(
-                    row.get(institute_col, '')
-                ).strip()
+            
+            # Preserve all row columns for custom placeholder replacement
+            for col_name in df.columns:
+                col_key = str(col_name).strip()
+                if col_key not in recipient:
+                    col_val = str(row[col_name]).strip() if col_name in row and str(row[col_name]).lower() != 'nan' else ''
+                    recipient[col_key] = col_val
 
             if is_valid:
                 valid_count += 1
@@ -288,50 +244,26 @@ def upload_file():
                 invalid_count += 1
 
             recipients.append(recipient)
-
-        excel_file = ExcelFile.create(
-            session['user_id'],
-            filename,
-            file.filename,
-            recipients
-        )
-
+        
+        excel_file = ExcelFile.create(session['user_id'], filename, file.filename, recipients)
         os.remove(filepath)
+        
+        total = len(recipients)
+        rate = round((valid_count / total * 100), 1) if total > 0 else 0
 
         return jsonify({
-
             'success': True,
-
             'file_id': str(excel_file['_id']),
-
-            'total_count': len(recipients),
-
+            'recipients': recipients,
+            'total_count': total,
             'valid_count': valid_count,
-
             'invalid_count': invalid_count,
-
-            'preview_recipients': recipients[:50],
-
-            'valid_emails': [
-                r for r in recipients
-                if r['status'] == 'VALID'
-            ],
-
-            'invalid_emails': [
-                r for r in recipients
-                if r['status'] == 'INVALID'
-            ]
-
+            'validation_rate': rate
         })
-
     except Exception as e:
-
         if os.path.exists(filepath):
             os.remove(filepath)
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+        return jsonify({'error': str(e)}), 500
 
 
 @user_bp.route('/api/excel-files/<file_id>', methods=['GET'])
@@ -574,7 +506,7 @@ def send_emails():
     try:
         content_type = str(request.content_type or '')
         print("\n" + "=" * 80)
-        print("🚀 [STEP 1] Request received for /api/send")
+        print("[STEP 1] Request received for /api/send")
         print("   Content-Type:", request.content_type)
         print("   Form Keys:", list(request.form.keys()) if request.form else [])
         print("   Files Keys:", list(request.files.keys()) if request.files else [])
@@ -597,7 +529,7 @@ def send_emails():
 
         # 1. Strictly isolated multipart/form-data path (ZERO calls to request.get_json or request.json)
         if content_type.startswith("multipart/form-data") or 'multipart/form-data' in content_type:
-            print("📋 [STEP 2] Parsing multipart/form-data form fields...")
+            print("[STEP 2] Parsing multipart/form-data form fields...")
             sender_email_id = str(request.form.get("sender_email_id", "") or "").strip()
             template_id = request.form.get("template_id")
             subject = str(request.form.get("subject", "") or "").strip()
@@ -615,7 +547,7 @@ def send_emails():
                 try:
                     recipients = json.loads(raw_recipients)
                 except Exception as e:
-                    print(f"❌ [STEP 2] Malformed JSON in recipients: {e}")
+                    print(f"[ERROR] [STEP 2] Malformed JSON in recipients: {e}")
                     return jsonify({'success': False, 'error': f'Invalid JSON format in recipients: {e}'}), 400
             else:
                 recipients = []
@@ -625,7 +557,7 @@ def send_emails():
                 try:
                     cc_emails = json.loads(raw_cc)
                 except Exception as e:
-                    print(f"⚠️ [STEP 2] Malformed JSON in cc_emails: {e}")
+                    print(f"[WARNING] [STEP 2] Malformed JSON in cc_emails: {e}")
                     cc_emails = [c.strip() for c in str(raw_cc).split(',') if c.strip()]
             else:
                 cc_emails = []
@@ -635,14 +567,14 @@ def send_emails():
                 try:
                     signature_data = json.loads(raw_sig)
                 except Exception as e:
-                    print(f"⚠️ [STEP 2] Malformed JSON in signature_data: {e}")
+                    print(f"[WARNING] [STEP 2] Malformed JSON in signature_data: {e}")
                     signature_data = {}
             else:
                 signature_data = {}
 
         # 2. application/json request path
         elif content_type.startswith("application/json") or 'application/json' in content_type:
-            print("📋 [STEP 2] Parsing application/json payload...")
+            print("[STEP 2] Parsing application/json payload...")
             try:
                 data = request.get_json(silent=True) or {}
             except Exception as e:
@@ -659,7 +591,7 @@ def send_emails():
             separate_threads = bool(data.get('separate_threads', True))
             signature_data = data.get('signature_data', {})
         else:
-            print("📋 [STEP 2] Parsing fallback request...")
+            print("[STEP 2] Parsing fallback request...")
             if request.form:
                 sender_email_id = str(request.form.get("sender_email_id", "") or "").strip()
                 template_id = request.form.get("template_id")
@@ -697,7 +629,7 @@ def send_emails():
         if request.files and 'logo' in request.files:
             logo_file = request.files.get("logo")
             if logo_file is not None and getattr(logo_file, 'filename', None) and logo_file.filename.strip():
-                print("🖼️ [STEP 3] Logo received:", logo_file.filename)
+                print("[STEP 3] Logo received:", logo_file.filename)
                 filename = secure_filename(logo_file.filename)
                 if not filename:
                     filename = "company_logo.png"
@@ -707,7 +639,7 @@ def send_emails():
                 print(f"   [STEP 3] Logo filename: '{filename}', Ext: '{ext}', Content-Type: '{getattr(logo_file, 'content_type', '')}'")
                 
                 if ext not in allowed_logo_exts:
-                    print(f"❌ [STEP 3] Unsupported logo extension '{ext}'")
+                    print(f"[ERROR] [STEP 3] Unsupported logo extension '{ext}'")
                     return jsonify({
                         'success': False,
                         'error': f"Unsupported logo format (.{ext}). Allowed formats: PNG, JPG, JPEG, SVG, WEBP."
@@ -716,21 +648,21 @@ def send_emails():
                 try:
                     logo_bytes = logo_file.read()
                 except Exception as read_err:
-                    print(f"❌ [STEP 3] Error reading logo file: {read_err}")
+                    print(f"[ERROR] [STEP 3] Error reading logo file: {read_err}")
                     return jsonify({'success': False, 'error': f'Failed to read uploaded logo file: {read_err}'}), 400
 
                 logo_size = len(logo_bytes) if logo_bytes else 0
                 print(f"   [STEP 3] Logo bytes read: {logo_size} bytes")
 
                 if logo_size > 2 * 1024 * 1024:
-                    print(f"❌ [STEP 3] Logo file exceeds 2MB limit ({logo_size} bytes)")
+                    print(f"[ERROR] [STEP 3] Logo file exceeds 2MB limit ({logo_size} bytes)")
                     return jsonify({
                         'success': False,
                         'error': 'Logo file size exceeds the maximum allowed limit of 2 MB.'
                     }), 400
 
                 if logo_size == 0:
-                    print("⚠️ [STEP 3] Warning: Uploaded logo file is 0 bytes, falling back to default logo")
+                    print("[WARNING] [STEP 3] Warning: Uploaded logo file is 0 bytes, falling back to default logo")
                 else:
                     mimetype = getattr(logo_file, 'content_type', None) or mimetypes.guess_type(filename)[0] or 'image/png'
                     custom_logo = {
@@ -738,7 +670,7 @@ def send_emails():
                         'data': logo_bytes,
                         'mimetype': mimetype
                     }
-                    print(f"✅ [STEP 3] Custom logo validated and ready: {filename} ({logo_size} bytes, MIME: {mimetype})")
+                    print(f"[SUCCESS] [STEP 3] Custom logo validated and ready: {filename} ({logo_size} bytes, MIME: {mimetype})")
 
         # [STEP 4] Normalize and validate parameters
         if isinstance(cc_emails, str):
@@ -748,7 +680,7 @@ def send_emails():
         else:
             cc_emails = []
 
-        print("📋 [STEP 4] Validating parameters:")
+        print("[STEP 4] Validating parameters:")
         print(f"   Sender ID: {sender_email_id}")
         print(f"   From Name: {from_name}")
         print(f"   Subject: {subject}")
@@ -759,42 +691,43 @@ def send_emails():
         print(f"   Signature Data: {signature_data}")
 
         if not recipients:
-            print("❌ [STEP 4] Validation Error: No recipients provided")
+            print("[ERROR] [STEP 4] Validation Error: No recipients provided")
             return jsonify({'success': False, 'error': 'No recipients provided'}), 400
         if not sender_email_id:
-            print("❌ [STEP 4] Validation Error: No sender email ID selected")
+            print("[ERROR] [STEP 4] Validation Error: No sender email ID selected")
             return jsonify({'success': False, 'error': 'Please select a sender email ID'}), 400
         if not subject:
-            print("❌ [STEP 4] Validation Error: Email subject is missing")
+            print("[ERROR] [STEP 4] Validation Error: Email subject is missing")
             return jsonify({'success': False, 'error': 'Email subject is required'}), 400
         if not body:
-            print("❌ [STEP 4] Validation Error: Email body is missing")
+            print("[ERROR] [STEP 4] Validation Error: Email body is missing")
             return jsonify({'success': False, 'error': 'Email body is required'}), 400
 
         if not isinstance(recipients, list):
-            print("❌ [STEP 4] Validation Error: Recipients must be a list")
+            print("[ERROR] [STEP 4] Validation Error: Recipients must be a list")
             return jsonify({'success': False, 'error': 'Recipients must be a list'}), 400
 
         normalized_recipients = []
         for r in recipients:
             if isinstance(r, dict):
-                email = str(r.get('email', '') or '').strip()
-                name = str(r.get('name', '') or '').strip() if r.get('name') else ''
-                institute = str(r.get('institute', '') or '').strip() if r.get('institute') else ''
+                r_dict = dict(r)
+                email = str(r_dict.get('email') or r_dict.get('Email') or r_dict.get('EMAIL') or '').strip()
+                if email and '@' in email:
+                    r_dict['email'] = email
+                    if 'name' not in r_dict:
+                        r_dict['name'] = str(r_dict.get('Name') or r_dict.get('NAME') or r_dict.get('Full Name') or r_dict.get('Recipient Name') or '').strip()
+                    if 'institute' not in r_dict:
+                        r_dict['institute'] = str(r_dict.get('Institute') or r_dict.get('INSTITUTE') or r_dict.get('College') or r_dict.get('University') or r_dict.get('Company') or '').strip()
+                    normalized_recipients.append(r_dict)
             elif isinstance(r, str):
                 email = r.strip()
-                name = ''
-                institute = ''
-            else:
-                continue
+                if email and '@' in email:
+                    normalized_recipients.append({'email': email, 'name': '', 'institute': ''})
 
-            if email and '@' in email:
-                normalized_recipients.append({'email': email, 'name': name, 'institute': institute})
-
-        print(f"👥 [STEP 4] Total parsed valid recipients: {len(normalized_recipients)}")
+        print(f"[STEP 4] Total parsed valid recipients: {len(normalized_recipients)}")
 
         if not normalized_recipients:
-            print("❌ [STEP 4] Validation Error: No valid email addresses found in recipients")
+            print("[ERROR] [STEP 4] Validation Error: No valid email addresses found in recipients")
             return jsonify({'success': False, 'error': 'No valid recipient email addresses found in request'}), 400
 
         # [STEP 5] Initialize sender accounts from database
@@ -803,7 +736,7 @@ def send_emails():
         try:
             user_email_ids = EmailID.get_by_user_with_passwords(user_id) if user_id else []
         except Exception as e:
-            print(f"⚠️ Warning retrieving email accounts for user: {e}")
+            print(f"[WARNING] Warning retrieving email accounts for user: {e}")
 
         try:
             selected_account_doc = EmailID.get_by_id_with_password(sender_email_id)
@@ -813,10 +746,10 @@ def send_emails():
                 if not already_present:
                     user_email_ids.insert(0, selected_account_doc)
         except Exception as e:
-            print(f"⚠️ Warning retrieving selected sender account: {e}")
+            print(f"[WARNING] Warning retrieving selected sender account: {e}")
 
         if not user_email_ids:
-            print(f"❌ [STEP 5] Sender Account Error: No email accounts found for user {user_id} or ID {sender_email_id}")
+            print(f"[ERROR] [STEP 5] Sender Account Error: No email accounts found for user {user_id} or ID {sender_email_id}")
             return jsonify({'success': False, 'error': 'No sender email accounts found for your user. Please configure an email account first.'}), 400
 
         email_accounts = []
@@ -839,7 +772,7 @@ def send_emails():
                 break
 
         # [STEP 6] Preparing MIME, personalizing body, and embedding signature / logo
-        print("📝 [STEP 6] Preparing message bodies and resolving attachments...")
+        print("[STEP 6] Preparing message bodies and resolving attachments...")
         if template_id and str(template_id).strip():
             try:
                 template = Template.get_by_id(template_id)
@@ -856,12 +789,12 @@ def send_emails():
                         if os.path.exists(abs_path):
                             file_size = os.path.getsize(abs_path)
                             mime_type, _ = mimetypes.guess_type(abs_path)
-                            print(f"📎 Attachment verified: {abs_path} (Size: {file_size} bytes, MIME: {mime_type})")
+                            print(f"[INFO] Attachment verified: {abs_path} (Size: {file_size} bytes, MIME: {mime_type})")
                             attachments.append(abs_path)
                         else:
-                            print(f"⚠️ Attachment missing on disk: {abs_path}")
+                            print(f"[WARNING] Attachment missing on disk: {abs_path}")
             except Exception as tmpl_err:
-                print(f"⚠️ Warning: Error resolving template attachments: {tmpl_err}")
+                print(f"[WARNING] Warning: Error resolving template attachments: {tmpl_err}")
 
         # Determine custom logo presence - strictly based on user upload, no fallback
         has_logo = (custom_logo is not None)
@@ -900,14 +833,14 @@ def send_emails():
 
         if personalized_recipients:
             sample_email = personalized_recipients[0]
-            print(f"📝 [STEP 6] Prepared {len(personalized_recipients)} messages. Sample Subject: '{sample_email['subject']}'")
+            print(f"[STEP 6] Prepared {len(personalized_recipients)} messages. Sample Subject: '{sample_email['subject']}'")
             if is_html:
                 save_debug_html(sample_email['body'])
                 save_debug_html(sample_email['body'], os.path.join(os.getcwd(), 'generated_email.html'))
-                print(f"🌐 [STEP 6] Generated HTML Email for {sample_email['email']} ({len(sample_email['body'])} chars)")
+                print(f"[STEP 6] Generated HTML Email for {sample_email['email']} ({len(sample_email['body'])} chars)")
 
         # [STEP 7] Initializing EmailSender and executing SMTP dispatch
-        print("🚀 [STEP 7] Initializing EmailSender and starting bulk dispatch...")
+        print("[STEP 7] Initializing EmailSender and starting bulk dispatch...")
         BATCH_SIZE = 25
         sender = EmailSender(email_accounts, batch_size=BATCH_SIZE, user_id=user_id)
         sender.current_account_index = start_index
@@ -928,16 +861,16 @@ def send_emails():
         sent_entries = result.get("sent_entries", [])
         failed_list = result.get("failed", [])
         sent_count = len(sent_entries)
-        print(f"📊 [STEP 7] Sending finished: {sent_count} sent, {len(failed_list)} failed")
+        print(f"[STEP 7] Sending finished: {sent_count} sent, {len(failed_list)} failed")
 
         # [STEP 8] Updating database logs safely
-        print("💾 [STEP 8] Updating database logs...")
+        print("[STEP 8] Updating database logs...")
         for sent_entry in sent_entries:
             log_sender_id = sent_entry.get('sender_email_id') or sender_email_id
             try:
                 EmailLog.create(user_id, log_sender_id, sent_entry['email'], subject, 'sent')
             except Exception as log_err:
-                print(f"   ⚠️ Database write warning for sent log: {log_err}")
+                print(f"   [WARNING] Database write warning for sent log: {log_err}")
 
         for fail_entry in failed_list:
             log_sender_id = fail_entry.get('sender_email_id') or sender_email_id
@@ -951,7 +884,7 @@ def send_emails():
                     fail_entry.get('error', 'Send failed')
                 )
             except Exception as log_err:
-                print(f"   ⚠️ Database write warning for failed log: {log_err}")
+                print(f"   [WARNING] Database write warning for failed log: {log_err}")
 
         try:
             stats = EmailLog.get_stats(user_id)
@@ -981,7 +914,7 @@ def send_emails():
             recent_logs = []
 
         # [STEP 9] Returning JSON response to client
-        print("🎉 [STEP 9] Returning JSON response to client:")
+        print("[STEP 9] Returning JSON response to client:")
         print(f"   Success: True, Sent: {sent_count}, Failed: {len(failed_list)}")
         print("=" * 80 + "\n")
 
@@ -997,14 +930,15 @@ def send_emails():
 
     except Exception as e:
         tb = traceback.format_exc()
+        safe_tb = tb.encode('ascii', 'backslashreplace').decode('ascii')
         print("\n" + "=" * 80)
-        print("🔥 CRITICAL BACKEND EXCEPTION IN /api/send:")
-        print(tb)
+        print("[CRITICAL EXCEPTION] IN /api/send:")
+        print(safe_tb)
         print("=" * 80 + "\n")
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': tb
+            'traceback': safe_tb
         }), 500
 
 
@@ -1045,218 +979,4 @@ def get_logs():
         'limit': limit,
         'total_pages': (total_count + limit - 1) // limit if total_count > 0 else 1
     })
-# ==========================
-# DATA REPOSITORY
-# ==========================
 
-@user_bp.route('/data-repository')
-@require_login
-def data_repository():
-
-    return render_template(
-        'user/data_repository.html',
-        username=session['username']
-    )
-
-
-@user_bp.route('/user/categories')
-@require_login
-def get_categories():
-
-    fixed_categories = [
-        "Industry",
-        "Doctor",
-        "Play School",
-        "General"
-    ]
-
-    result = []
-
-    for category in fixed_categories:
-
-        count = len(
-            RepositoryFile.get_by_category(category)
-        )
-
-        result.append({
-            "category": category,
-            "files_count": count
-        })
-
-    return jsonify(result)
-
-
-@user_bp.route('/user/category-page/<category>')
-@require_login
-def category_page(category):
-
-    return render_template(
-        'user/category_files.html',
-        category=category
-    )
-
-
-@user_bp.route('/user/category/<category>')
-@require_login
-def get_category_files(category):
-
-    files = RepositoryFile.get_by_category(category)
-
-    result = []
-
-    for file in files:
-
-        result.append({
-            "id": str(file["_id"]),
-            "file_name": file.get("filename", ""),
-            "status": file.get("status", "Available"),
-            "allocated_to": file.get("allocated_to", ""),
-            "download_count": file.get("download_count", 0),
-            "category": file.get("category", "General")
-        })
-
-    return jsonify(result)
-
-
-# ==========================
-# ALLOCATE FILE
-# ==========================
-
-@user_bp.route('/user/allocate-file/<file_id>', methods=['POST'])
-@require_login
-def allocate_file(file_id):
-
-    username = session['username']
-
-    db = MongoDB.get_db()
-
-    # Check if user already has an allocated file
-    existing_file = db[Collections.REPOSITORY_FILES].find_one({
-        "allocated_to": username
-    })
-
-    if existing_file:
-        return jsonify({
-            "success": False,
-            "message": f"You already have an allocated file: {existing_file.get('filename')}"
-        }), 400
-
-    file = RepositoryFile.get_by_id(file_id)
-
-    if not file:
-        return jsonify({
-            "success": False,
-            "message": "File not found"
-        }), 404
-
-    if file.get("allocated_to"):
-        return jsonify({
-            "success": False,
-            "message": f"File already allocated to {file.get('allocated_to')}"
-        }), 400
-
-    db[Collections.REPOSITORY_FILES].update_one(
-        {
-            "_id": ObjectId(file_id)
-        },
-        {
-            "$set": {
-                "allocated_to": username,
-                "status": "Allocated"
-            }
-        }
-    )
-
-    return jsonify({
-        "success": True,
-        "message": "File allocated successfully"
-    })
-
-
-# ==========================
-# UNALLOCATE FILE
-# ==========================
-
-@user_bp.route('/user/unallocate-file/<file_id>', methods=['POST'])
-@require_login
-def unallocate_file(file_id):
-
-    username = session['username']
-
-    file = RepositoryFile.get_by_id(file_id)
-
-    if not file:
-        return jsonify({
-            "success": False,
-            "message": "File not found"
-        }), 404
-
-    if file.get("allocated_to") != username:
-        return jsonify({
-            "success": False,
-            "message": f"File is allocated to {file.get('allocated_to')}"
-        }), 403
-
-    db = MongoDB.get_db()
-
-    db[Collections.REPOSITORY_FILES].update_one(
-        {
-            "_id": ObjectId(file_id)
-        },
-        {
-            "$set": {
-                "allocated_to": None,
-                "status": "Available"
-            }
-        }
-    )
-
-    return jsonify({
-        "success": True,
-        "message": "File unallocated successfully"
-    })
-
-
-# ==========================
-# DOWNLOAD FILE
-# ==========================
-
-@user_bp.route('/user/download-file/<file_id>')
-@require_login
-def download_file(file_id):
-
-    username = session['username']
-
-    file = RepositoryFile.get_by_id(file_id)
-
-    if not file:
-        return "File not found", 404
-
-    if file.get("allocated_to") != username:
-        return f"File is allocated to {file.get('allocated_to')}", 403
-
-    file_path = file.get("path")
-
-    if not file_path:
-        return "Path missing in database", 404
-
-    if not os.path.exists(file_path):
-        return f"Missing file: {file_path}", 404
-
-    db = MongoDB.get_db()
-
-    db[Collections.REPOSITORY_FILES].update_one(
-        {
-            "_id": ObjectId(file_id)
-        },
-        {
-            "$inc": {
-                "download_count": 1
-            }
-        }
-    )
-
-    return send_file(
-        file_path,
-        as_attachment=True
-    )

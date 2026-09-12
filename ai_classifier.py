@@ -82,13 +82,13 @@ def extract_content(file_path):
 
         else:
 
-            print(f"⚠ Unsupported file type: {ext}")
+            print(f"[WARNING] Unsupported file type: {ext}")
 
             return ""
 
     except Exception as e:
 
-        print("❌ Extraction Error:", e)
+        print("[ERROR] Extraction Error:", e)
 
         return ""
 
@@ -102,13 +102,13 @@ def classify_file(file_path):
     content = extract_content(file_path)
 
     print("\n" + "=" * 80)
-    print(f"📄 FILE: {file_path}")
-    print("\n📑 EXTRACTED CONTENT:\n")
+    print(f"[FILE] FILE: {file_path}")
+    print("\n[CONTENT] EXTRACTED CONTENT:\n")
 
     if content:
         print(content[:1500])
     else:
-        print("❌ No content extracted")
+        print("[ERROR] No content extracted")
 
     print("=" * 80)
 
@@ -141,7 +141,7 @@ def classify_file(file_path):
 
     if any(word in content_lower for word in doctor_keywords):
 
-        print("✅ Keyword Match -> Doctor")
+        print("[SUCCESS] Keyword Match -> Doctor")
 
         return "Doctor"
 
@@ -166,7 +166,7 @@ def classify_file(file_path):
 
     if any(word in content_lower for word in industry_keywords):
 
-        print("✅ Keyword Match -> Industry")
+        print("[SUCCESS] Keyword Match -> Industry")
 
         return "Industry"
 
@@ -192,7 +192,7 @@ def classify_file(file_path):
 
     if any(word in content_lower for word in school_keywords):
 
-        print("✅ Keyword Match -> Play School")
+        print("[SUCCESS] Keyword Match -> Play School")
 
         return "Play School"
 
@@ -221,7 +221,7 @@ Document:
 
     try:
 
-        print("🤖 Sending to Ollama...")
+        print("[AI] Sending to Ollama...")
 
         response = requests.post(
             OLLAMA_URL,
@@ -242,18 +242,18 @@ Document:
 
         category = category.replace("\n", "").strip()
 
-        print(f"🤖 Ollama Returned: {category}")
+        print(f"[AI] Ollama Returned: {category}")
 
         if category not in VALID_CATEGORIES:
 
-            print("⚠ Invalid Category Returned")
+            print("[WARNING] Invalid Category Returned")
             category = "General"
 
         return category
 
     except Exception as e:
 
-        print("❌ Ollama Error:", e)
+        print("[ERROR] Ollama Error:", e)
 
         return "General"
 
@@ -267,18 +267,18 @@ def classify_file_background(file_path, filename):
     try:
 
         print("\n" + "=" * 80)
-        print("🚀 BACKGROUND CLASSIFICATION STARTED")
-        print(f"📄 Filename: {filename}")
-        print(f"📂 Path: {file_path}")
+        print("[START] BACKGROUND CLASSIFICATION STARTED")
+        print(f"[FILE] Filename: {filename}")
+        print(f"[PATH] Path: {file_path}")
 
         category = classify_file(file_path)
 
-        print(f"🎯 Category Returned: {category}")
+        print(f"[RESULT] Category Returned: {category}")
         print("=" * 80)
 
         return category
 
     except Exception as e:
 
-        print(f"❌ Classification Error: {e}")
+        print(f"[ERROR] Classification Error: {e}")
         return "General"

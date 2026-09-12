@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Newsletter — Under Development</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --primary-color: #4a90d9; --success-color: #28a745; --danger-color: #dc3545; --warning-color: #ffc107; }
+        body { background: #f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .sidebar { min-height: 100vh; background: white; box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1); }
+        .sidebar .nav-link { color: #333; padding: 12px 20px; border-radius: 8px; margin: 5px 10px; transition: all 0.3s; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background: var(--primary-color); color: white; }
+        .sidebar .nav-link i { margin-right: 10px; }
+        .main-content { padding: 30px; }
+        .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); margin-bottom: 20px; }
+        .card-header { background: white; border-bottom: 2px solid #f0f0f0; padding: 15px 20px; font-weight: 600; }
+        .user-info { padding: 15px 20px; border-bottom: 1px solid #eee; margin-bottom: 10px; }
+        .dev-alert { background: #fff3cd; border-left: 4px solid #ffc107; color: #856404; padding: 12px 20px; border-radius: 6px; margin-bottom: 20px; }
+        .newsletter-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .preview-box { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 25px; min-height: 250px; max-width: 650px; margin: 0 auto; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-2 sidebar">
+                <div class="user-info">
+                    <i class="fas fa-user-circle me-2"></i>
+                    <strong>{{ username }}</strong>
+                </div>
+                <nav class="nav flex-column">
+                    <a class="nav-link" href="/dashboard"><i class="fas fa-home"></i> Dashboard</a>
+                    <a class="nav-link" href="/email-ids"><i class="fas fa-envelope"></i> Email IDs</a>
+                    <a class="nav-link" href="/uploads"><i class="fas fa-upload"></i> Uploads</a>
+                    <a class="nav-link" href="/compose"><i class="fas fa-pen"></i> Compose</a>
+                    <a class="nav-link active" href="/newsletter">
+                        <i class="fas fa-newspaper"></i> Newsletter <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">Dev</span>
+                    </a>
+                    <a class="nav-link" href="/banner-builder">
+                        <i class="fas fa-image"></i> Banner with Content <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">Dev</span>
+                    </a>
+                    <a class="nav-link" href="/logs"><i class="fas fa-history"></i> Logs</a>
+                    <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                </nav>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-md-10 main-content">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2><i class="fas fa-newspaper text-primary me-2"></i> Newsletter Manager</h2>
+                    <span class="badge bg-warning text-dark px-3 py-2 fs-6"><i class="fas fa-code me-1"></i> Feature Under Development</span>
+                </div>
+
+                <div class="dev-alert">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Marketing Team Notice:</strong> This Newsletter feature operates on a <strong>completely isolated email pipeline</strong>. Creating or sending newsletters here will not affect standard Compose or original email logs.
+                </div>
+
+                <!-- Main Grid -->
+                <div class="row">
+                    <!-- Saved Newsletters List -->
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-list text-primary me-2"></i> Saved Newsletters</span>
+                                <button class="btn btn-sm btn-outline-primary" onclick="resetForm()"><i class="fas fa-plus"></i> New</button>
+                            </div>
+                            <div class="card-body p-2" id="newslettersList">
+                                <div class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i> Loading saved newsletters...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Newsletter Form Editor -->
+                    <div class="col-md-8">
+                        <div class="card">
+                            <div class="card-header"><i class="fas fa-edit text-primary me-2"></i> <span id="formTitle">Create New Newsletter</span></div>
+                            <div class="card-body">
+                                <form id="newsletterForm">
+                                    <input type="hidden" id="newsletterId" value="">
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Newsletter Title / Campaign Name</label>
+                                        <input type="text" class="form-control" id="title" required placeholder="e.g., Monthly Product Roundup - August 2026">
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Email Subject</label>
+                                        <input type="text" class="form-control" id="subject" required placeholder="e.g., Latest News & Product Updates from {{institute}}">
+                                        <small class="text-muted">Placeholders like {{name}} or {{institute}} are supported.</small>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Newsletter Content (HTML/Rich Text)</label>
+                                        <textarea class="form-control" id="content" rows="10" required placeholder="<h1>Welcome to our August Newsletter!</h1>&#10;<p>Dear Recipient,</p>&#10;<p>Here are the latest updates from our marketing team...</p>"></textarea>
+                                    </div>
+
+                                    <!-- Recipient Selection -->
+                                    <div class="card mb-3 bg-light border">
+                                        <div class="card-body">
+                                            <h6 class="fw-bold mb-3"><i class="fas fa-users text-primary me-2"></i> Recipient Selection</h6>
+                                            <div class="row">
+                                                <div class="col-md-6 mb-2">
+                                                    <label class="form-label">Select Excel/CSV Upload File</label>
+                                                    <select class="form-select" id="recipientFileSelect">
+                                                        <option value="">-- Choose Uploaded File --</option>
+                                                        {% for file in excel_files %}
+                                                        <option value="{{ file._id }}">{{ file.original_filename }} ({{ file.recipient_count }} recipients)</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-6 mb-2">
+                                                    <label class="form-label">Select Sender Email Account</label>
+                                                    <select class="form-select" id="senderEmailSelect" required>
+                                                        <option value="">-- Choose Sender Email --</option>
+                                                        {% for eid in email_ids %}
+                                                        <option value="{{ eid._id }}">{{ eid.email }} (Sent: {{ eid.emails_sent }}/25)</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <button type="button" class="btn btn-secondary me-2" onclick="previewNewsletter()"><i class="fas fa-eye me-1"></i> Preview</button>
+                                            <button type="button" class="btn btn-outline-primary" onclick="saveNewsletterDraft()"><i class="fas fa-save me-1"></i> Save Draft</button>
+                                        </div>
+                                        <button type="submit" class="btn btn-success px-4" id="sendBtn"><i class="fas fa-paper-plane me-1"></i> Send Newsletter</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- Status Log Box -->
+                        <div class="card d-none" id="statusCard">
+                            <div class="card-header bg-light"><i class="fas fa-tasks me-2"></i> Newsletter Sending Status</div>
+                            <div class="card-body">
+                                <div id="statusContent"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div class="modal fade" id="previewModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-eye text-primary me-2"></i> Newsletter Live Preview</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body bg-light">
+                    <h6 id="previewSubject" class="fw-bold mb-3 text-secondary"></h6>
+                    <div class="preview-box" id="previewContainer"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let newsletters = [];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadNewsletters();
+        });
+
+        async function loadNewsletters() {
+            try {
+                const res = await fetch('/api/newsletters');
+                const data = await res.json();
+                if (data.success) {
+                    newsletters = data.newsletters || [];
+                    renderNewslettersList();
+                }
+            } catch (e) {
+                console.error('Error loading newsletters:', e);
+            }
+        }
+
+        function renderNewslettersList() {
+            const listEl = document.getElementById('newslettersList');
+            if (!newsletters || newsletters.length === 0) {
+                listEl.innerHTML = '<div class="text-center py-4 text-muted"><i class="fas fa-folder-open me-2"></i> No saved newsletters found.</div>';
+                return;
+            }
+            listEl.innerHTML = newsletters.map(n => `
+                <div class="newsletter-item">
+                    <div>
+                        <strong class="d-block text-dark">${escapeHtml(n.title)}</strong>
+                        <small class="text-muted">${escapeHtml(n.subject)}</small>
+                    </div>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-primary" onclick="editNewsletter('${n._id}')"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-outline-danger" onclick="deleteNewsletter('${n._id}')"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(str) {
+            return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function resetForm() {
+            document.getElementById('newsletterId').value = '';
+            document.getElementById('title').value = '';
+            document.getElementById('subject').value = '';
+            document.getElementById('content').value = '';
+            document.getElementById('formTitle').innerText = 'Create New Newsletter';
+        }
+
+        function editNewsletter(id) {
+            const item = newsletters.find(n => n._id === id);
+            if (!item) return;
+            document.getElementById('newsletterId').value = item._id;
+            document.getElementById('title').value = item.title || '';
+            document.getElementById('subject').value = item.subject || '';
+            document.getElementById('content').value = item.content || '';
+            document.getElementById('formTitle').innerText = 'Edit Newsletter: ' + item.title;
+        }
+
+        async function saveNewsletterDraft() {
+            const title = document.getElementById('title').value.trim();
+            const subject = document.getElementById('subject').value.trim();
+            const content = document.getElementById('content').value.trim();
+            const id = document.getElementById('newsletterId').value;
+
+            if (!title || !subject) {
+                alert('Please provide a title and subject for the newsletter.');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/newsletters', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, title, subject, content })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Newsletter draft saved successfully!');
+                    loadNewsletters();
+                } else {
+                    alert('Save failed: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error saving draft: ' + e);
+            }
+        }
+
+        async function deleteNewsletter(id) {
+            if (!confirm('Are you sure you want to delete this newsletter?')) return;
+            try {
+                const res = await fetch('/api/newsletters/' + id, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    loadNewsletters();
+                } else {
+                    alert('Delete failed: ' + data.error);
+                }
+            } catch (e) {
+                alert('Error deleting: ' + e);
+            }
+        }
+
+        function previewNewsletter() {
+            const subject = document.getElementById('subject').value || 'Subject Line Preview';
+            const content = document.getElementById('content').value || '<p class="text-muted">No content entered yet.</p>';
+            
+            document.getElementById('previewSubject').innerText = 'Subject: ' + subject;
+            document.getElementById('previewContainer').innerHTML = content;
+            
+            const modal = new bootstrap.Modal(document.getElementById('previewModal'));
+            modal.show();
+        }
+
+        document.getElementById('newsletterForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileId = document.getElementById('recipientFileSelect').value;
+            const senderId = document.getElementById('senderEmailSelect').value;
+            const subject = document.getElementById('subject').value.trim();
+            const content = document.getElementById('content').value.trim();
+
+            if (!senderId) {
+                alert('Please select a sender email account.');
+                return;
+            }
+            if (!fileId) {
+                alert('Please select a recipient Excel/CSV file.');
+                return;
+            }
+
+            const sendBtn = document.getElementById('sendBtn');
+            const statusCard = document.getElementById('statusCard');
+            const statusContent = document.getElementById('statusContent');
+            
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Sending...';
+            statusCard.classList.remove('d-none');
+            statusContent.innerHTML = '<div class="text-primary"><i class="fas fa-cog fa-spin me-2"></i> Fetching recipients and sending newsletter via isolated pipeline...</div>';
+
+            try {
+                // Fetch recipients from excel file route
+                const fileRes = await fetch('/api/excel-files/' + fileId);
+                const fileData = await fileRes.json();
+                const recipients = fileData.recipients || [];
+
+                if (!recipients.length) {
+                    statusContent.innerHTML = '<div class="text-danger"><i class="fas fa-times-circle me-2"></i> No valid recipients found in selected file.</div>';
+                    sendBtn.disabled = false;
+                    sendBtn.innerHTML = '<i class="fas fa-paper-plane me-1"></i> Send Newsletter';
+                    return;
+                }
+
+                // Send via Newsletter API
+                const sendRes = await fetch('/api/newsletters/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sender_email_id: senderId,
+                        subject: subject,
+                        content: content,
+                        recipients: recipients
+                    })
+                });
+                const result = await sendRes.json();
+
+                if (result.success) {
+                    statusContent.innerHTML = `
+                        <div class="alert alert-success">
+                            <h6><i class="fas fa-check-circle me-2"></i> Newsletter Sent Successfully!</h6>
+                            <p class="mb-0">Total Sent: <strong>${result.sent}</strong> | Failed: <strong>${result.failed}</strong></p>
+                        </div>
+                    `;
+                } else {
+                    statusContent.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-circle me-2"></i> Send Error: ${result.error}</div>`;
+                }
+            } catch (err) {
+                statusContent.innerHTML = `<div class="alert alert-danger"><i class="fas fa-times-circle me-2"></i> Exception: ${err}</div>`;
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '<i class="fas fa-paper-plane me-1"></i> Send Newsletter';
+            }
+        });
+    </script>
+</body>
+</html>

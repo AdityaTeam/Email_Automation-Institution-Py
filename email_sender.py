@@ -71,7 +71,7 @@ class EmailSender:
                     EmailID.increment_sent_count(account_id)
                 except Exception as db_error:
                     print(f"Failed to persist sent count for {current.get('email')}: {db_error}")
-            print(f"📊 {current.get('email')}: {current.get('emails_sent', 0)}/{self.batch_size}")
+            print(f"[COUNTER] {current.get('email')}: {current.get('emails_sent', 0)}/{self.batch_size}")
     
     def needs_rotation(self):
         """Check if current account needs rotation (DB-driven)"""
@@ -79,9 +79,9 @@ class EmailSender:
         if not current:
             return True
         count = self.get_account_sent_count()
-        print(f"🔍 {current.get('email')}: {count}/{self.batch_size}")
+        print(f"[CHECK] {current.get('email')}: {count}/{self.batch_size}")
         if count >= self.batch_size:
-            print(f"🚫 LIMIT REACHED for {current.get('email')}")
+            print(f"[LIMIT REACHED] for {current.get('email')}")
             return True
         return False
     
@@ -97,21 +97,21 @@ class EmailSender:
             if not self.needs_rotation():
                 current = self.get_current_account()
                 if current:
-                    print(f"✅ Selected: {current.get('email')} ({self.get_account_sent_count()}/{self.batch_size})")
+                    print(f"[SELECTED ACCOUNT] {current.get('email')} ({self.get_account_sent_count()}/{self.batch_size})")
                     return True
         
         # All accounts exhausted
-        print("🔄 ALL ACCOUNTS EXHAUSTED - Need reset!")
+        print("[RESET] ALL ACCOUNTS EXHAUSTED - Need reset!")
         return False
     
     def switch_account(self):
-        print("🔁 Rotating to next available account...")
+        print("[ROTATION] Rotating to next available account...")
         if not self.find_next_available_account():
-            print("⚠️  No available accounts - reset required")
+            print("[WARNING] No available accounts - reset required")
         else:
             current = self.get_current_account()
             if current:
-                print(f"🔄 Now using: {current.get('email')}")
+                print("[ACTIVE ACCOUNT] Now using: " + str(current.get('email')))
 
     def _html_to_plain_text(self, html):
         """Create readable plain-text fallback from HTML body."""
@@ -157,10 +157,10 @@ class EmailSender:
                 part.add_header('Content-Location', c_filename)
                 part.add_header('X-Attachment-Id', 'company_logo')
                 part.set_param('name', c_filename)
-                print(f"✅ Custom inline logo attached ({len(c_data)} bytes, {c_mime}) as CID <company_logo>")
+                print(f"[SUCCESS] Custom inline logo attached ({len(c_data)} bytes, {c_mime}) as CID <company_logo>")
                 return part
         except Exception as c_err:
-            print(f"⚠️ Custom logo attach error: {c_err}")
+            print(f"[WARNING] Custom logo attach error: {c_err}")
 
         return None
 
@@ -221,7 +221,7 @@ class EmailSender:
             for att_path in attachments:
                 try:
                     if not att_path or not os.path.exists(att_path):
-                        print(f"⚠️ Attachment not found: {att_path}")
+                        print(f"[WARNING] Attachment not found: {att_path}")
                         continue
 
                     file_size = os.path.getsize(att_path)
@@ -245,10 +245,10 @@ class EmailSender:
                     )
                     part.set_param('name', filename)
                     msg.attach(part)
-                    print(f"✅ Attached file: {filename} ({file_size} bytes, MIME: {main_type}/{sub_type})")
+                    print(f"[SUCCESS] Attached file: {filename} ({file_size} bytes, MIME: {main_type}/{sub_type})")
 
                 except Exception as e:
-                    print(f"❌ Attachment error for {att_path}: {e}")
+                    print(f"[ERROR] Attachment error for {att_path}: {e}")
         else:
             msg = body_part
 
@@ -307,7 +307,7 @@ class EmailSender:
         use_tls = account.get('use_tls', True)
         password = account.get('password', '')
 
-        print(f"🔌 Connecting to SMTP: {smtp_server}:{smtp_port} for {email_addr} (TLS: {use_tls})")
+        print(f"[SMTP CONNECT] Connecting to SMTP: {smtp_server}:{smtp_port} for {email_addr} (TLS: {use_tls})")
         try:
             if smtp_port == 465:
                 context = ssl.create_default_context()
@@ -327,20 +327,20 @@ class EmailSender:
                 self.server.login(email_addr, password)
 
             self.connected_account_email = email_addr
-            print(f"✅ SMTP connected & authenticated for {email_addr}")
+            print(f"[SUCCESS] SMTP connected & authenticated for {email_addr}")
             return True, None
 
         except smtplib.SMTPAuthenticationError as auth_err:
             self.server = None
             self.connected_account_email = None
             err_msg = f"Authentication failed for {email_addr}. Check App Password."
-            print(f"❌ {err_msg}: {auth_err}")
+            print(f"[ERROR] {err_msg}: {auth_err}")
             return False, err_msg
         except (smtplib.SMTPConnectError, socket.error, socket.timeout) as conn_err:
             self.server = None
             self.connected_account_email = None
             err_msg = f"Network/Connection error for {email_addr} ({smtp_server}:{smtp_port}): {conn_err}"
-            print(f"❌ {err_msg}")
+            print(f"[ERROR] {err_msg}")
             return False, f"Could not connect to SMTP server {smtp_server}:{smtp_port}: {conn_err}"
         except Exception as e:
             return False, f"SMTP Connection error for {email_addr}: {str(e)}"
@@ -366,11 +366,11 @@ class EmailSender:
         # 2. Ensure active SMTP connection for current account
         conn_ok, conn_error = self.ensure_connection()
         if not conn_ok:
-            print(f"❌ Connection failed: {conn_error}")
+            print(f"[ERROR] Connection failed: {conn_error}")
             return False, conn_error
         
         try:
-            print("📝 [Step 6] Preparing message...")
+            print("[STEP 6] Preparing message...")
             msg = self.create_email_message(
                 to_email=to_email_str,
                 subject=subject_str,
@@ -409,7 +409,7 @@ class EmailSender:
             unreplaced_placeholders = re.findall(r'\{\{\s*[\w\-]+\s*\}\}', body_str)
 
             print("=" * 65)
-            print("🚀 [Step 7] Sending email via SMTP:")
+            print("[STEP 7] Sending email via SMTP:")
             print(f"   Subject: {subject_str}")
             print(f"   From: {from_name} <{sender_email}>")
             print(f"   To: {to_email}")
@@ -422,7 +422,7 @@ class EmailSender:
             print(f"   Plain Text Length: {plain_len} chars")
             print(f"   Unreplaced Placeholders Count: {len(unreplaced_placeholders)}")
             if unreplaced_placeholders:
-                print(f"   ⚠️ Warning: Found unreplaced placeholders: {unreplaced_placeholders}")
+                print(f"   [WARNING] Warning: Found unreplaced placeholders: {unreplaced_placeholders}")
             print(f"   Custom Logo: {'Yes' if custom_logo else 'None'}")
             print(f"   Root Content-Type: {msg.get_content_type()}")
             print("   --- MIME HIERARCHY TREE ---")
@@ -438,11 +438,11 @@ class EmailSender:
                         recipients, 
                         msg_raw
                     )
-                    print(f"✅ Email successfully delivered to {to_email} via {sender_email}")
+                    print(f"[DELIVERED] Email successfully delivered to {to_email} via {sender_email}")
                     return True, None
                 except (smtplib.SMTPServerDisconnected, smtplib.SMTPSenderRefused) as net_err:
                     last_err = str(net_err)
-                    print(f"🔄 Retrying send ({attempt+1}/2) due to: {net_err}")
+                    print(f"[RETRY] Retrying send ({attempt+1}/2) due to: {net_err}")
                     self.server = None
                     self.connected_account_email = None
                     conn_ok, _ = self.ensure_connection()
@@ -460,7 +460,7 @@ class EmailSender:
         except Exception as e:
             traceback.print_exc()
             err_msg = f"Unexpected send error: {str(e)}"
-            print(f"❌ {err_msg}")
+            print(f"[ERROR] {err_msg}")
             self.server = None
             self.connected_account_email = None
             return False, err_msg
@@ -483,12 +483,12 @@ class EmailSender:
             attachments = []
         
         total_recipients = len(recipients)
-        print(f"\n📧 Starting bulk email send...")
-        print(f"📊 Total recipients: {total_recipients}")
-        print(f"📊 Batch size: {self.batch_size} emails per account")
-        print(f"📊 Number of accounts: {len(self.email_accounts)}")
-        print(f"📧 From: {from_name}")
-        print(f"📝 Subject: {subject}\n")
+        print(f"\n[BULK SEND] Starting bulk email send...")
+        print(f"   Total recipients: {total_recipients}")
+        print(f"   Batch size: {self.batch_size} emails per account")
+        print(f"   Number of accounts: {len(self.email_accounts)}")
+        print(f"   From: {from_name}")
+        print(f"   Subject: {subject}\n")
 
         for index, recipient in enumerate(recipients, 1):
             if isinstance(recipient, dict):
@@ -516,7 +516,7 @@ class EmailSender:
             # Check rotation BEFORE every send
             if self.needs_rotation():
                 if not self.find_next_available_account():
-                    print("🔄 All accounts exhausted. Resetting...")
+                    print("[RESET] All accounts exhausted. Resetting...")
                     if self.user_id:
                         try:
                             from models import EmailID
@@ -544,14 +544,14 @@ class EmailSender:
             
             current = self.get_current_account()
             if success:
-                print(f"✅ Sent (Account: {current.get('email') if current else 'Unknown'})")
+                print(f"[SENT] Sent (Account: {current.get('email') if current else 'Unknown'})")
                 self.increment_current_account()
                 self.sent_entries.append({
                     'email': to_email,
                     'sender_email_id': current.get('_id') if current else None
                 })
             else:
-                print(f"❌ Failed: {error_msg}")
+                print(f"[FAILED] Failed: {error_msg}")
                 self.failed.append({
                     'email': to_email,
                     'error': error_msg or 'Send failed',
@@ -582,15 +582,15 @@ class EmailSender:
     def print_summary(self):
         """Print sending summary"""
         print("\n" + "="*50)
-        print("📊 SENDING SUMMARY")
+        print("[SUMMARY] SENDING SUMMARY")
         print("="*50)
-        print(f"✅ Total emails sent: {self.total_sent}")
-        print(f"❌ Failed: {len(self.failed)}")
-        print(f"📧 Accounts used: {self.current_account_index + 1}")
+        print(f"[SENT] Total emails sent: {self.total_sent}")
+        print(f"[FAILED] Failed: {len(self.failed)}")
+        print(f"[ACCOUNTS] Accounts used: {self.current_account_index + 1}")
         print("="*50)
         
         if self.failed:
-            print("\n❌ Failed recipients:")
+            print("\n[FAILED LIST] Failed recipients:")
             for fail in self.failed:
                 print(f"   {fail.get('email')}: {fail.get('error')}")
     
@@ -600,7 +600,7 @@ class EmailSender:
         self.total_sent = 0
         self.failed = []
         self.sent_entries = []
-        print("🔄 EmailSender local counters reset")
+        print("[RESET] EmailSender local counters reset")
     
     def set_initial_counts(self, counts_dict):
         """Set initial email counts from database values"""
@@ -610,4 +610,4 @@ class EmailSender:
             for account in self.email_accounts:
                 if account.get('email', '').lower() == str(email_addr).lower():
                     account['db_sent_count'] = count
-        print(f"📊 Initialized email counts: {counts_dict}")
+        print(f"[INITIALIZED] Initialized email counts: {counts_dict}")
