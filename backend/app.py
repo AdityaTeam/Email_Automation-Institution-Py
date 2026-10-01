@@ -6,10 +6,11 @@ With MongoDB integration and role-based access control
 import os
 from flask import Flask, render_template
 from database import MongoDB, init_db
-from routes.auth import auth_bp
-from routes.user import user_bp
-from routes.admin import admin_bp
-from routes.updates import updates_bp
+from backend.routes.auth import auth_bp
+from backend.routes.user import user_bp
+from backend.routes.admin import admin_bp
+from backend.routes.updates import updates_bp
+from backend.routes.scraper import scraper_bp
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', '3c935dc77ecc7312ef3414aaf939f276')
@@ -25,6 +26,7 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(user_bp)
 app.register_blueprint(admin_bp)
 app.register_blueprint(updates_bp)
+app.register_blueprint(scraper_bp)
 
 
 @app.route('/')

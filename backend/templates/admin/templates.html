@@ -97,6 +97,17 @@
             border-radius: 8px;
             font-size: 0.9rem;
         }
+
+        .visual-preview-box {
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
         
         .badge-req {
             background: var(--primary-color);
@@ -126,9 +137,6 @@
                     <a class="nav-link" href="/admin/cc">
                         <i class="fas fa-copy"></i> CC Emails
                     </a>
-                    <a class="nav-link active" href="/admin/templates">
-                        <i class="fas fa-file-alt"></i> Templates
-                    </a>
                     <a class="nav-link" href="/admin/logs">
                         <i class="fas fa-history"></i> Logs
                     </a>
@@ -136,7 +144,6 @@
                         <i class="fas fa-sign-out-alt"></i> Logout
                     </a>
                 </nav>
-
             </div>
             
             <!-- Main Content -->
@@ -201,11 +208,11 @@
                                 </div>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Email Body</label>
-                                <textarea class="form-control" id="templateBody" rows="5" placeholder="Email body with {{name}} placeholders" required></textarea>
+                                <label class="form-label">Email Body (Text or HTML)</label>
+                                <textarea class="form-control" id="templateBody" rows="8" placeholder="Enter plaintext or HTML structure with dynamic tags like {{name}} and {{institute}}" required></textarea>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Attachments (Optional)</label>
+                                <label class="form-label">Attachments (Optional Header Banner / Files)</label>
                                 <small class="text-muted d-block mb-2">PDF, DOCX, XLSX, PPTX, PNG, JPG, ZIP (Multiple files allowed)</small>
                                 <input type="file" class="form-control" id="templateAttachments" name="attachments" multiple accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.zip">
                             </div>
@@ -238,12 +245,14 @@
                             </div>
                             <div class="template-body">
                                 <strong>Subject:</strong> {{ template.subject }}<br>
-                                <strong>Body:</strong>
-                                <pre class="mt-2">{{ template.body }}</pre>
+                                <strong class="d-block mt-2">Visual Layout Preview:</strong>
+                                <div class="visual-preview-box">
+                                    {{ template.body|safe }}
+                                </div>
                                 {% if template.attachments and template.attachments|length > 0 %}
-                                <div class="mt-3">
+                                <div class="mt-2">
                                     <strong>Attachments ({{ template.attachments|length }}):</strong>
-                                    <ul class="list-unstyled mt-1">
+                                    <ul class="list-unstyled mt-1 mb-0">
                                         {% for att in template.attachments %}
                                         <li><i class="fas fa-paperclip text-muted me-1"></i>{{ att.split('/')[-1] }}</li>
                                         {% endfor %}
@@ -282,8 +291,8 @@
                             <input type="text" class="form-control" id="editTemplateSubject" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Body</label>
-                            <textarea class="form-control" id="editTemplateBody" rows="8" required></textarea>
+                            <label class="form-label">Body (HTML or Text)</label>
+                            <textarea class="form-control" id="editTemplateBody" rows="10" required></textarea>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Attachments (Optional)</label>
@@ -378,7 +387,6 @@
             document.getElementById('editTemplateSubject').value = template.subject;
             document.getElementById('editTemplateBody').value = template.body;
             
-            // Clear attachments input
             document.getElementById('editTemplateAttachments').value = '';
             
             new bootstrap.Modal(document.getElementById('editTemplateModal')).show();

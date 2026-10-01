@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Scraped Data Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --admin-primary: #343a40; --primary-color: #4a90d9; }
+        body { background: #f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .sidebar { min-height: 100vh; background: #212529; color: white; }
+        .sidebar .nav-link { color: #rgba(255,255,255,0.75); padding: 12px 20px; border-radius: 8px; margin: 5px 10px; transition: all 0.3s; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background: #343a40; color: white; }
+        .sidebar .nav-link i { margin-right: 10px; }
+        .main-content { padding: 30px; }
+        .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); margin-bottom: 20px; }
+        .card-header { background: white; border-bottom: 2px solid #f0f0f0; padding: 15px 20px; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Admin Sidebar -->
+            <div class="col-md-2 sidebar p-0">
+                <div class="p-3 border-bottom border-secondary">
+                    <i class="fas fa-user-shield me-2"></i><strong>Admin Panel</strong>
+                </div>
+                <nav class="nav flex-column mt-2">
+                    <a class="nav-link" href="/admin/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a>
+                    <a class="nav-link" href="/admin/users"><i class="fas fa-users"></i> Users</a>
+                    <a class="nav-link active" href="/admin/scraper-logs"><i class="fas fa-database"></i> Scraped Data</a>
+                    <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                </nav>
+            </div>
+
+            <!-- Main Workspace -->
+            <div class="col-md-10 main-content">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="fas fa-database text-dark me-2"></i> Global Scraped Data Repository</h2>
+                    <span class="badge bg-dark px-3 py-2" id="totalRecordsBadge">0 Total Records</span>
+                </div>
+
+                <!-- Filter Controls Card -->
+                <div class="card">
+                    <div class="card-header"><i class="fas fa-filter me-2"></i> Filter & Search Records</div>
+                    <div class="card-body">
+                        <form id="filterForm" class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label small text-muted">SEARCH QUERY / NAME / EMAIL</label>
+                                <input type="text" id="filterQuery" class="form-control" placeholder="Search name, headline, query...">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small text-muted">SCRAPED BY USER ID</label>
+                                <select id="filterUserId" class="form-select">
+                                    <option value="">All Users</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">HAS PHONE</label>
+                                <select id="filterHasPhone" class="form-select">
+                                    <option value="">All</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small text-muted">HAS EMAIL</label>
+                                <select id="filterHasEmail" class="form-select">
+                                    <option value="">All</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="col-md-1 d-flex align-items-end">
+                                <button type="submit" class="btn btn-dark w-100"><i class="fas fa-search"></i></button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Data Table Card -->
+                <div class="card">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Profile Name</th>
+                                        <th>Headline / Bio</th>
+                                        <th>Discovered Contact</th>
+                                        <th>Scraped By (User ID)</th>
+                                        <th>Last Query</th>
+                                        <th>Date Scraped</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="recordsTbody">
+                                    <tr>
+                                        <td colspan="8" class="text-center py-4 text-muted">Loading records...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card-footer bg-white d-flex justify-content-between align-items-center">
+                        <span class="small text-muted" id="paginationInfo">Showing page 1</span>
+                        <ul class="pagination pagination-sm mb-0" id="paginationUl"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentPage = 1;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadScrapedData(1);
+
+            document.getElementById('filterForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                loadScrapedData(1);
+            });
+        });
+
+        async function loadScrapedData(page = 1) {
+            currentPage = page;
+            const query = document.getElementById('filterQuery').value;
+            const userId = document.getElementById('filterUserId').value;
+            const hasPhone = document.getElementById('filterHasPhone').value;
+            const hasEmail = document.getElementById('filterHasEmail').value;
+
+            const url = `/api/admin/scraped-data?page=${page}&limit=20&query=${encodeURIComponent(query)}&user_id=${encodeURIComponent(userId)}&has_phone=${hasPhone}&has_email=${hasEmail}`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    renderTable(data.profiles, (page - 1) * 20);
+                    renderPagination(data.page, data.total_pages);
+                    document.getElementById('totalRecordsBadge').textContent = `${data.total} Total Records`;
+                    
+                    // Populate User Dropdown
+                    if (data.available_users) {
+                        const userSelect = document.getElementById('filterUserId');
+                        const currentVal = userSelect.value;
+                        userSelect.innerHTML = '<option value="">All Users</option>';
+                        data.available_users.forEach(uId => {
+                            if (uId) {
+                                const opt = document.createElement('option');
+                                opt.value = uId;
+                                opt.textContent = uId;
+                                if (uId === currentVal) opt.selected = true;
+                                userSelect.appendChild(opt);
+                            }
+                        });
+                    }
+                }
+            } catch (err) {
+                console.error('Error fetching scraped data:', err);
+            }
+        }
+
+        function renderTable(profiles, offset) {
+            const tbody = document.getElementById('recordsTbody');
+            tbody.innerHTML = '';
+
+            if (!profiles || profiles.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted">No scraped records found matching criteria.</td></tr>';
+                return;
+            }
+
+            profiles.forEach((p, idx) => {
+                const tr = document.createElement('tr');
+                const emailsHtml = (p.emails && p.emails.length) ? p.emails.map(e => `<span class="badge bg-success me-1">${e}</span>`).join('') : '<span class="text-muted small">No Email</span>';
+                const phonesHtml = (p.contact_numbers && p.contact_numbers.length) ? p.contact_numbers.map(ph => `<span class="badge bg-info text-dark me-1">${ph}</span>`).join('') : '';
+
+                tr.innerHTML = `
+                    <td>${offset + idx + 1}</td>
+                    <td><strong>${p.name || 'LinkedIn Profile'}</strong></td>
+                    <td><div class="small text-muted" style="max-width:250px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${p.headline || p.snippet || 'N/A'}</div></td>
+                    <td>${emailsHtml} ${phonesHtml}</td>
+                    <td><span class="badge bg-secondary">${p.scraped_by_user_id || 'Unknown'}</span></td>
+                    <td><span class="badge bg-light text-dark border">${p.last_query || 'N/A'}</span></td>
+                    <td class="small text-muted">${p.last_scraped_at ? p.last_scraped_at.substring(0, 16).replace('T', ' ') : 'N/A'}</td>
+                    <td><a href="${p.profile_url}" target="_blank" class="btn btn-sm btn-outline-primary"><i class="fab fa-linkedin"></i></a></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderPagination(current, totalPages) {
+            const ul = document.getElementById('paginationUl');
+            ul.innerHTML = '';
+
+            document.getElementById('paginationInfo').textContent = `Page ${current} of ${totalPages}`;
+
+            if (totalPages <= 1) return;
+
+            for (let i = 1; i <= totalPages; i++) {
+                const li = document.createElement('li');
+                li.className = `page-item ${i === current ? 'active' : ''}`;
+                li.innerHTML = `<a class="page-link" href="#" onclick="loadScrapedData(${i}); return false;">${i}</a>`;
+                ul.appendChild(li);
+            }
+        }
+    </script>
+</body>
+</html>

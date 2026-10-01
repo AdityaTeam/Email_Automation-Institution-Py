@@ -1,15 +1,18 @@
 """
-User Panel Routes - Backup
-Handles user dashboard, email management, and email sending
+User Panel Routes
+Handles user dashboard, email management, CSV/Excel parsing, verification, and email sending
 """
 
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
-from regex import template
 from models import EmailID, ExcelFile, Template, Requirement, EmailLog
 from database import MongoDB, Collections
 from bson import ObjectId
 import os
 import pandas as pd
+import re
+import dns.resolver
+import smtplib
+import socket
 from werkzeug.utils import secure_filename
 from email_sender import EmailSender
 
@@ -40,6 +43,80 @@ SMTP_CONFIG = {
 }
 
 DEFAULT_SMTP = {'smtp_server': 'smtp.gmail.com', 'smtp_port': 587}
+
+EMAIL_REGEX = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+
+# Block non-deliverable documentation and throwaway email domains
+DISALLOWED_DOMAINS = {
+    'example.com', 'example.org', 'example.net', 
+    'test.com', 'test.org', 'test.net',
+    'invalid.com', 'localhost', 'local.domain',
+    'mailinator.com', 'tempmail.com', 'dispostable.com', 
+    '10minutemail.com', 'guerrillamail.com', 'trashmail.com'
+}
+
+
+def verify_email_smtp(email):
+    """
+    Verify email existence using strict regex syntax checks, reserved domain filtering,
+    DNS MX lookups, and SMTP socket verification.
+    """
+    if not isinstance(email, str):
+        return False, "Invalid email type"
+
+    email = email.strip()
+
+    # 1. Regex Syntax Check BEFORE domain splitting
+    if not re.match(EMAIL_REGEX, email):
+        return False, "Invalid syntax"
+
+    # Safely split domain
+    parts = email.split('@')
+    if len(parts) != 2:
+        return False, "Invalid email format"
+
+    domain = parts[1].strip().lower().rstrip('.')
+
+    # Domain sanity check to prevent IDNA codec crash
+    if not domain or '..' in domain or domain.startswith('-') or domain.endswith('-'):
+        return False, "Invalid domain format"
+
+    # 2. Block reserved test / disposable domains immediately
+    if domain in DISALLOWED_DOMAINS:
+        return False, f"Reserved/fake test domain ({domain})"
+
+    # 3. DNS MX Record Lookup
+    try:
+        records = dns.resolver.resolve(domain, 'MX')
+        if not records or len(records) == 0:
+            return False, "No MX records found"
+        mx_host = str(records[0].exchange).rstrip('.')
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
+        return False, "Domain or MX record does not exist"
+    except Exception as e:
+        return False, f"Domain lookup failed ({type(e).__name__})"
+
+    # 4. SMTP Socket Connection & RCPT TO Verification
+    try:
+        server = smtplib.SMTP(timeout=4)
+        server.connect(mx_host, 25)
+        server.helo("verify.local")
+        server.mail("verify@verify.local")
+
+        code, _ = server.rcpt(email)
+        server.quit()
+
+        if code == 250:
+            return True, "Valid/Deliverable"
+        elif code == 550:
+            return False, "Mailbox does not exist"
+        else:
+            return False, f"Rejected with server code {code}"
+
+    except (socket.error, smtplib.SMTPException):
+        # Port 25 is commonly blocked on residential or local networks.
+        # Since MX records exist and domain is not in the blocklist, treat domain as valid.
+        return True, "Valid domain (Port 25 check bypassed)"
 
 
 def detect_smtp_settings(email):
@@ -158,7 +235,7 @@ def uploads():
 @user_bp.route('/api/upload', methods=['POST'])
 @require_login
 def upload_file():
-    """Upload and process Excel/CSV"""
+    """Upload, process Excel/CSV, and separate valid vs. non-existent emails"""
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
     
@@ -180,7 +257,7 @@ def upload_file():
             os.remove(filepath)
             return jsonify({'error': 'Invalid format. Use CSV or Excel'}), 400
         
-        df.columns = [col.strip() for col in df.columns]
+        df.columns = [str(col).strip() for col in df.columns]
         
         email_col = None
         for col in df.columns:
@@ -200,25 +277,45 @@ def upload_file():
             if col.lower() == 'institute':
                 institute_col = col
         
-        recipients = []
+        valid_recipients = []
+        invalid_recipients = []
+
         for _, row in df.iterrows():
-            email = str(row[email_col]).strip() if pd.notna(row[email_col]) else ''
+            raw_email = row[email_col]
+
+            # Safely handle NaN / Float values from Pandas
+            if pd.isna(raw_email):
+                continue
+
+            email = str(raw_email).strip()
+
             if email and '@' in email:
                 recipient = {'email': email}
-                if name_col:
-                    recipient['name'] = str(row[name_col]).strip() if pd.notna(row[name_col]) else ''
-                if institute_col:
-                    recipient['institute'] = str(row[institute_col]).strip() if pd.notna(row[institute_col]) else ''
-                recipients.append(recipient)
+                if name_col and pd.notna(row[name_col]):
+                    recipient['name'] = str(row[name_col]).strip()
+                if institute_col and pd.notna(row[institute_col]):
+                    recipient['institute'] = str(row[institute_col]).strip()
+                
+                # Verify email existence safely
+                is_valid, reason = verify_email_smtp(email)
+                recipient['status_reason'] = reason
+
+                if is_valid:
+                    valid_recipients.append(recipient)
+                else:
+                    invalid_recipients.append(recipient)
         
-        excel_file = ExcelFile.create(session['user_id'], filename, file.filename, recipients)
+        # Save ONLY valid recipients into database record
+        excel_file = ExcelFile.create(session['user_id'], filename, file.filename, valid_recipients)
         os.remove(filepath)
         
         return jsonify({
             'success': True,
             'file_id': str(excel_file['_id']),
-            'recipients': recipients[:10],
-            'count': len(recipients)
+            'valid_count': len(valid_recipients),
+            'invalid_count': len(invalid_recipients),
+            'valid_recipients': valid_recipients,
+            'invalid_recipients': invalid_recipients
         })
     except Exception as e:
         if os.path.exists(filepath):
@@ -331,17 +428,11 @@ def send_emails():
     if not isinstance(cc_emails, list):
         cc_emails = []
     cc_emails = [cc.strip() for cc in cc_emails if isinstance(cc, str) and cc.strip()]
-    
-    print(f"📧 CC Emails: {cc_emails}")  # Debug CC
-    
-    # debug start
-    print("send_emails called. template_id=", template_id)
 
     # Fetch template attachments if template_id provided
     if template_id:
         template = Template.get_by_id(template_id)
         if template and 'attachments' in template:
-            # Convert to absolute paths
             BASE_DIR = os.path.abspath(os.getcwd())
 
             for rel_path in template['attachments']:
@@ -349,14 +440,6 @@ def send_emails():
 
                 if os.path.exists(abs_path):
                     attachments.append(abs_path)
-                else:
-                    print("Attachment missing:", abs_path)
-        else:
-            # no attachments key or template not found
-            print("No attachments found for template", template_id)
-
-    # debug log always show attachments list (even if empty)
-    print("Computed attachments list:", attachments)
     
     if not recipients or not sender_email_id or not subject or not body:
         return jsonify({'error': 'All fields required'}), 400
@@ -364,7 +447,6 @@ def send_emails():
     signature = Template.build_signature(signature_data)
     user_email_ids = EmailID.get_by_user_with_passwords(session['user_id'])
     
-    # Build email accounts list with their current sent counts from database
     email_accounts = []
     for eid in user_email_ids:
         email_accounts.append({
@@ -375,14 +457,12 @@ def send_emails():
             'use_tls': eid.get('use_tls', True),
             'use_ssl': eid.get('use_ssl', False),
             '_id': str(eid['_id']),
-            'emails_sent': eid.get('emails_sent', 0)  # Get current count from DB
+            'emails_sent': eid.get('emails_sent', 0)
         })
     
-    # If no email accounts available
     if not email_accounts:
         return jsonify({'error': 'No sender email IDs configured'}), 400
     
-    # Find starting index based on selected sender
     start_index = 0
     for i, acc in enumerate(email_accounts):
         if acc['_id'] == sender_email_id:
@@ -426,7 +506,6 @@ def send_emails():
         failed_list = result.get("failed", [])
         sent_count = len(sent_entries)
         
-        # Log results with actual sender account used for each recipient.
         for sent_entry in sent_entries:
             log_sender_id = sent_entry.get('sender_email_id') or sender_email_id
             EmailLog.create(session['user_id'], log_sender_id, sent_entry['email'], subject, 'sent')
@@ -442,7 +521,6 @@ def send_emails():
                 fail_entry.get('error', 'Send failed')
             )
 
-        # Return updated values so frontend can sync compose UI immediately.
         stats = EmailLog.get_stats(session['user_id'])
         refreshed_email_ids = EmailID.get_by_user(session['user_id'])
         email_usage = []
@@ -490,7 +568,7 @@ def logs():
 @user_bp.route('/api/logs', methods=['GET'])
 @require_login
 def get_logs():
-    """Get paginated email logs (FEATURE 2)"""
+    """Get paginated email logs"""
     page = int(request.args.get('page', 1))
     limit = int(request.args.get('limit', 100))
     logs = EmailLog.get_by_user_paginated(session['user_id'], page, limit)
@@ -510,4 +588,3 @@ def get_logs():
         'limit': limit,
         'total_pages': (total_count + limit - 1) // limit if total_count > 0 else 1
     })
-

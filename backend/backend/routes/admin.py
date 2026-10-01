@@ -1,6 +1,6 @@
 """
 Admin Panel Routes
-Handles admin dashboard, user management, and system control
+Handles admin dashboard, user management, system control, and global scraper monitoring.
 """
 
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
@@ -9,8 +9,18 @@ from database import MongoDB, Collections
 from bson import ObjectId
 import os
 from werkzeug.utils import secure_filename
+from pymongo import MongoClient
 
 admin_bp = Blueprint('admin', __name__)
+
+MONGO_URI = os.getenv("MONGO_URI")
+MONGO_DB_NAME = os.getenv("MONGO_DB", "signal_scraper")
+
+
+def get_scraper_db():
+    """Helper to get MongoDB client for scraper collections"""
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    return client[MONGO_DB_NAME]
 
 
 def require_admin(f):
@@ -41,7 +51,6 @@ def require_admin(f):
 @require_admin
 def dashboard():
     """Admin dashboard"""
-    # Get system stats
     users = User.get_all()
     total_users = len(users)
     
@@ -54,10 +63,8 @@ def dashboard():
     total_excel_files = sum(len(ExcelFile.get_by_user(str(u['_id']))) for u in users)
     stats = EmailLog.get_stats()
     
-    # Get recent logs
     recent_logs = EmailLog.get_all(limit=20)
     
-    # Get users with basic info
     user_list = []
     for user in users:
         user_stats = EmailLog.get_stats(str(user['_id']))
@@ -120,13 +127,11 @@ def view_user(user_id):
     if not user:
         return "User not found", 404
     
-    # Get email IDs with decrypted passwords (admin only)
     email_ids = EmailID.get_by_user_with_passwords(user_id)
     excel_files = ExcelFile.get_by_user(user_id)
     logs = EmailLog.get_by_user(user_id, limit=50)
     stats = EmailLog.get_stats(user_id)
     
-    # Convert ObjectIds to strings for template
     for eid in email_ids:
         eid['_id'] = str(eid['_id'])
     for file in excel_files:
@@ -136,7 +141,6 @@ def view_user(user_id):
         log['user_id'] = str(log['user_id'])
         log['sender_email_id'] = str(log.get('sender_email_id', ''))
     
-    # Get sender emails for logs
     email_id_map = {str(eid['_id']): eid['email'] for eid in email_ids}
     for log in logs:
         log['sender_email'] = email_id_map.get(str(log.get('sender_email_id')), 'Unknown')
@@ -146,7 +150,7 @@ def view_user(user_id):
                            view_user={
                                '_id': str(user['_id']),
                                'username': user['username'],
-                               'password': user['password'],  # bcrypt hash (not decrypted)
+                               'password': user['password'],
                                'created_at': user.get('created_at'),
                                'is_active': user.get('is_active', True)
                            },
@@ -205,7 +209,6 @@ def templates():
     requirements = Requirement.get_all()
     templates_list = Template.get_all()
     
-    # Convert ObjectIds
     for r in requirements:
         r['_id'] = str(r['_id'])
     
@@ -308,7 +311,6 @@ def add_template():
     if not all([requirement_id, name, subject, body]):
         return jsonify({'error': 'All fields are required'}), 400
     
-    # Handle attachments
     attachments = []
     ALLOWED_EXTENSIONS = {'pdf', 'docx', 'xlsx', 'pptx', 'png', 'jpg', 'jpeg', 'zip'}
     upload_dir = 'uploads/template_attachments'
@@ -354,9 +356,8 @@ def update_template(template_id):
     if not all([template_data['name'], template_data['subject'], template_data['body']]):
         return jsonify({'error': 'All fields are required'}), 400
     
-    # Handle attachments (replace existing)
     attachments = []
-    ALLOWED_EXTENSIONS = {'pdf', 'docx', 'xlsx', 'pptx','png', 'jpg', 'jpeg', 'zip'}
+    ALLOWED_EXTENSIONS = {'pdf', 'docx', 'xlsx', 'pptx', 'png', 'jpg', 'jpeg', 'zip'}
     upload_dir = 'uploads/template_attachments'
     os.makedirs(upload_dir, exist_ok=True)
     
@@ -386,6 +387,95 @@ def delete_template(template_id):
     return jsonify({'error': 'Failed to delete template'}), 400
 
 
+# ==================== Scraper Administration ====================
+
+@admin_bp.route('/admin/scraper-logs')
+@require_admin
+def admin_scraper_logs():
+    """Render admin scraper logs management page"""
+    return render_template('admin/scraper_logs.html', username=session.get('username', 'Admin'))
+
+
+@admin_bp.route('/api/admin/scraped-data', methods=['GET'])
+@require_admin
+def get_all_scraped_data():
+    """
+    Fetch paginated, filtered scraped LinkedIn profiles across all users.
+    Query Params:
+      - query: search term filter
+      - user_id: filter by specific user
+      - has_phone: 'true'/'false'
+      - has_email: 'true'/'false'
+      - page: page number (default 1)
+      - limit: items per page (default 20)
+    """
+    try:
+        db = get_scraper_db()
+        
+        search_query = request.args.get('query', '').strip()
+        filter_user_id = request.args.get('user_id', '').strip()
+        has_phone = request.args.get('has_phone', '').lower()
+        has_email = request.args.get('has_email', '').lower()
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+        skip = (page - 1) * limit
+
+        mongo_filter = {}
+
+        if search_query:
+            mongo_filter['$or'] = [
+                {'name': {'$regex': search_query, '$options': 'i'}},
+                {'headline': {'$regex': search_query, '$options': 'i'}},
+                {'last_query': {'$regex': search_query, '$options': 'i'}},
+                {'emails': {'$regex': search_query, '$options': 'i'}}
+            ]
+
+        if filter_user_id:
+            mongo_filter['scraped_by_user_id'] = filter_user_id
+
+        if has_phone == 'true':
+            mongo_filter['contact_numbers'] = {'$exists': True, '$not': {'$size': 0}}
+        elif has_phone == 'false':
+            mongo_filter['$or'] = [
+                {'contact_numbers': {'$exists': False}},
+                {'contact_numbers': {'$size': 0}}
+            ]
+
+        if has_email == 'true':
+            mongo_filter['emails'] = {'$exists': True, '$not': {'$size': 0}}
+        elif has_email == 'false':
+            mongo_filter['$or'] = [
+                {'emails': {'$exists': False}},
+                {'emails': {'$size': 0}}
+            ]
+
+        total_count = db.linkedin_profiles.count_documents(mongo_filter)
+        cursor = db.linkedin_profiles.find(mongo_filter).sort('last_scraped_at', -1).skip(skip).limit(limit)
+
+        profiles = []
+        for doc in cursor:
+            doc['_id'] = str(doc['_id'])
+            if 'first_scraped_at' in doc and doc['first_scraped_at']:
+                doc['first_scraped_at'] = doc['first_scraped_at'].isoformat() if hasattr(doc['first_scraped_at'], 'isoformat') else str(doc['first_scraped_at'])
+            if 'last_scraped_at' in doc and doc['last_scraped_at']:
+                doc['last_scraped_at'] = doc['last_scraped_at'].isoformat() if hasattr(doc['last_scraped_at'], 'isoformat') else str(doc['last_scraped_at'])
+            profiles.append(doc)
+
+        unique_users = db.linkedin_profiles.distinct('scraped_by_user_id')
+
+        return jsonify({
+            'success': True,
+            'profiles': profiles,
+            'total': total_count,
+            'page': page,
+            'limit': limit,
+            'total_pages': (total_count + limit - 1) // limit if total_count > 0 else 1,
+            'available_users': unique_users
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ==================== Logs ====================
 
 @admin_bp.route('/admin/logs')
@@ -394,11 +484,9 @@ def logs():
     """View all email logs"""
     logs_list = EmailLog.get_all(limit=100)
     
-    # Get all users for mapping
     users = User.get_all()
     user_map = {str(u['_id']): u['username'] for u in users}
     
-    # Get all email IDs
     db = MongoDB.get_db()
     all_email_ids = {}
     if db is not None:
@@ -422,7 +510,7 @@ def logs():
 @admin_bp.route('/api/admin/logs', methods=['GET'])
 @require_admin
 def get_all_logs():
-    """Get paginated email logs (FEATURE 2)"""
+    """Get paginated email logs"""
     page = int(request.args.get('page', 1))
     limit = int(request.args.get('limit', 100))
     logs_list = EmailLog.get_all_paginated(page, limit)
@@ -444,7 +532,6 @@ def get_all_logs():
         log['username'] = user_map.get(log['user_id'], 'Unknown')
         log['sender_email_id'] = str(log.get('sender_email_id', ''))
         log['sender_email'] = all_email_ids.get(str(log.get('sender_email_id')), 'Unknown')
-        # Ensure sent_at is a string
         if 'sent_at' in log and log['sent_at']:
             log['sent_at'] = log['sent_at'].isoformat() if hasattr(log['sent_at'], 'isoformat') else str(log['sent_at'])
     
@@ -457,21 +544,16 @@ def get_all_logs():
     })
 
 
-# ==================== Statistics ====================
+# ==================== CC & Logo Management ====================
 
 @admin_bp.route('/api/admin/cc-emails', methods=['GET'])
 @require_admin
 def get_cc_emails():
-    print("🔍 DEBUG API: /api/admin/cc-emails GET called")
     from models import CcEmail
     
     cc_emails = CcEmail.get_all()
-    print(f"🔍 DEBUG API: CcEmail.get_all() returned {len(cc_emails)} items")
-    print(f"🔍 DEBUG API: First item: {cc_emails[0] if cc_emails else 'NONE'}")
-    
     safe_data = []
 
-    
     for cc in cc_emails:
         safe_data.append({
             "_id": str(cc.get("_id")),
@@ -518,19 +600,6 @@ def cc_management():
     return render_template('admin/cc.html', username=session['username'])
 
 
-# @admin_bp.route('/api/admin/logo', methods=['GET'])
-# @require_admin
-# def get_logo_status():
-#     """Get current logo status"""
-#     import os
-#     logo_path = 'backend/uploads/logo/company_logo.jpeg'
-#     logo_exists = os.path.exists(logo_path)
-#     return jsonify({
-#         'logo_exists': logo_exists,
-#         'logo_path': logo_path
-#     })
-
-
 @admin_bp.route('/api/admin/logo-upload', methods=['POST'])
 @require_admin
 def upload_logo():
@@ -542,7 +611,6 @@ def upload_logo():
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
     
-    from werkzeug.utils import secure_filename
     filename = secure_filename(file.filename)
     if not filename.lower().endswith(('.png', '.jpg', '.jpeg')):
         return jsonify({'error': 'Only PNG/JPG allowed'}), 400
@@ -554,6 +622,8 @@ def upload_logo():
     file.save(logo_path)
     return jsonify({'success': True, 'message': 'Logo uploaded successfully'})
 
+
+# ==================== Statistics ====================
 
 @admin_bp.route('/api/admin/stats')
 @require_admin
@@ -573,5 +643,3 @@ def get_stats():
         'emails_sent': stats['sent'],
         'emails_failed': stats['failed']
     })
-
-

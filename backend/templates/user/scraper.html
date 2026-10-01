@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact Scraper - Bulk Email Sender</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { 
+            --primary-color: #4a90d9; 
+            --success-color: #28a745; 
+            --danger-color: #dc3545; 
+            --warning-color: #ffc107;
+            --info-color: #17a2b8;
+        }
+        body { background: #f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .sidebar { min-height: 100vh; background: white; box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1); }
+        .sidebar .nav-link { color: #333; padding: 12px 20px; border-radius: 8px; margin: 5px 10px; transition: all 0.3s; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background: var(--primary-color); color: white; }
+        .sidebar .nav-link i { margin-right: 10px; }
+        .main-content { padding: 30px; }
+        .user-info { padding: 15px 20px; border-bottom: 1px solid #eee; margin-bottom: 10px; }
+        
+        .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); margin-bottom: 20px; }
+        .card-header { background: white; border-bottom: 2px solid #f0f0f0; padding: 15px 20px; font-weight: 600; }
+        .card-header i { margin-right: 10px; color: var(--primary-color); }
+        
+        .stat-card { text-align: center; padding: 15px; border-radius: 10px; background: #fff; border: 1px solid #eef2f5; }
+        .stat-card .stat-value { font-size: 1.6rem; font-weight: 700; margin-top: 5px; }
+        .stat-card .stat-label { font-size: 0.75rem; color: #6c757d; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
+
+        .email-chip { display: inline-block; background: #eef5fc; color: #2b6cb0; border: 1px solid #c3dafe; border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; font-weight: 500; font-family: monospace; }
+        .profile-item-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; background: white; transition: transform 0.2s, box-shadow 0.2s; }
+        .profile-item-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .profile-item-card.has-phone { border-left: 4px solid #17a2b8; }
+        
+        .domain-item-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px; background: white; margin-bottom: 10px; }
+        .domain-item-card:last-child { margin-bottom: 0; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar Navigation -->
+            <div class="col-md-2 sidebar">
+                <div class="user-info">
+                    <i class="fas fa-user-circle me-2"></i>
+                    <strong>{{ username }}</strong>
+                </div>
+                <nav class="nav flex-column">
+                    <a class="nav-link" href="/dashboard"><i class="fas fa-home"></i> Dashboard</a>
+                    <a class="nav-link" href="/email-ids"><i class="fas fa-envelope"></i> Email IDs</a>
+                    <a class="nav-link" href="/uploads"><i class="fas fa-upload"></i> Uploads</a>
+                    <a class="nav-link active" href="/scraper"><i class="fas fa-filter"></i> Scraper</a>
+                    <a class="nav-link" href="/compose"><i class="fas fa-pen"></i> Compose</a>
+                    <a class="nav-link" href="/logs"><i class="fas fa-history"></i> Logs</a>
+                    <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                </nav>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="col-md-10 main-content">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="fas fa-filter text-primary me-2"></i> Contact Discovery Scraper</h2>
+                    <span id="statusBadge" class="badge bg-secondary px-3 py-2"></span>
+                </div>
+
+                <div id="errorAlert" class="alert alert-danger" style="display:none;"></div>
+
+                <!-- Search Console Card -->
+                <div class="card">
+                    <div class="card-header"><i class="fas fa-search"></i> Extraction Parameters</div>
+                    <div class="card-body">
+                        <form id="searchForm">
+                            <div class="row g-3">
+                                <div class="col-md-8">
+                                    <label class="form-label font-semibold small text-muted">SEARCH QUERY</label>
+                                    <input type="text" id="query" class="form-control" required value="venture catalysts" placeholder="e.g. AI Engineer India">
+                                </div>
+                                <div class="col-md-4 d-flex align-items-end">
+                                    <button type="submit" id="submitBtn" class="btn btn-primary w-100 py-2">
+                                        <i class="fas fa-play me-2"></i> Run Extraction
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="row g-3 mt-2">
+                                <div class="col-md-3">
+                                    <label class="form-label small text-muted">SEARCH RESULTS</label>
+                                    <input type="number" id="maxResults" class="form-control" value="30" min="10" max="100">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small text-muted">PAGES / SITE</label>
+                                    <input type="number" id="maxPages" class="form-control" value="5" min="1" max="15">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small text-muted">WORKER THREADS</label>
+                                    <input type="number" id="maxWorkers" class="form-control" value="8" min="1" max="16">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small text-muted">LINKEDIN LIMIT</label>
+                                    <input type="number" id="maxLinkedin" class="form-control" value="20" min="1" max="50">
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Loader Indicator -->
+                <div id="loader" style="display:none;" class="text-center py-5">
+                    <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
+                    <h5 class="text-dark">Extracting Contacts across Web & LinkedIn...</h5>
+                    <p class="text-muted small">Crawling public domain emails and fetching profile metadata...</p>
+                </div>
+
+                <!-- Results Output -->
+                <div id="results" style="display:none;">
+                    <!-- Metrics Row -->
+                    <div class="row g-3 mb-4">
+                        <div class="col">
+                            <div class="stat-card">
+                                <div class="stat-label">Unique Emails</div>
+                                <div id="metricEmails" class="stat-value text-success">0</div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="stat-card">
+                                <div class="stat-label">Domains Crawled</div>
+                                <div id="metricDomains" class="stat-value text-primary">0</div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="stat-card">
+                                <div class="stat-label">Execution Time</div>
+                                <div id="metricTime" class="stat-value text-dark">0s</div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="stat-card">
+                                <div class="stat-label">LinkedIn Profiles</div>
+                                <div id="metricLinkedin" class="stat-value text-info">0</div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="stat-card">
+                                <div class="stat-label">Saved to DB</div>
+                                <div id="metricSaved" class="stat-value text-secondary">0</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Extracted Emails Panel -->
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="fas fa-at"></i> Discovered Email Addresses</span>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="copyAllEmails()"><i class="fas fa-copy me-1"></i> Copy All</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="emailList" class="d-flex flex-wrap gap-2" style="max-height: 250px; overflow-y: auto;"></div>
+                        </div>
+                    </div>
+
+                    <!-- LinkedIn Profiles Panel -->
+                    <div class="card">
+                        <div class="card-header"><i class="fab fa-linkedin text-info"></i> Priority Relevant LinkedIn Profiles</div>
+                        <div class="card-body">
+                            <div id="linkedinList" class="row g-3" style="max-height: 420px; overflow-y: auto;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Domain Breakdown Panel -->
+                    <div class="card">
+                        <div class="card-header"><i class="fas fa-globe"></i> Crawled Domain Breakdown</div>
+                        <div class="card-body">
+                            <div id="domainList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clean Profile Details Modal -->
+    <div class="modal fade" id="profileDetailModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fab fa-linkedin text-primary me-2"></i> LinkedIn Profile Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered">
+                            <tbody>
+                                <tr>
+                                    <th width="25%" class="bg-light">Full Name</th>
+                                    <td id="modalProfileName" class="fw-bold"></td>
+                                </tr>
+                                <tr>
+                                    <th class="bg-light">Headline / Role</th>
+                                    <td id="modalProfileHeadline" class="text-primary"></td>
+                                </tr>
+                                <tr>
+                                    <th class="bg-light">Discovered Emails</th>
+                                    <td id="modalProfileEmails"></td>
+                                </tr>
+                                <tr>
+                                    <th class="bg-light">Phone Numbers</th>
+                                    <td id="modalProfilePhones"></td>
+                                </tr>
+                                <tr>
+                                    <th class="bg-light">Indexed Bio / Snippet</th>
+                                    <td id="modalProfileSnippet" class="small text-muted"></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <a id="modalProfileLink" href="#" target="_blank" class="btn btn-primary"><i class="fab fa-linkedin me-1"></i> Open on LinkedIn</a>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let globalLinkedinProfiles = [];
+        let globalEmails = [];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const searchForm = document.getElementById('searchForm');
+            const submitBtn = document.getElementById('submitBtn');
+            const statusBadge = document.getElementById('statusBadge');
+            const errorAlert = document.getElementById('errorAlert');
+            const loader = document.getElementById('loader');
+            const results = document.getElementById('results');
+
+            searchForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const queryInput = document.getElementById('query');
+                const query = queryInput ? queryInput.value.trim() : '';
+                if (!query) return;
+
+                results.style.display = 'none';
+                errorAlert.style.display = 'none';
+                loader.style.display = 'block';
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Extracting...';
+                statusBadge.className = 'badge bg-warning text-dark px-3 py-2';
+                statusBadge.textContent = 'Processing';
+
+                try {
+                    const response = await fetch('/api/scrape', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            query: query,
+                            max_results: parseInt(document.getElementById('maxResults').value, 10) || 30,
+                            max_pages_per_site: parseInt(document.getElementById('maxPages').value, 10) || 5,
+                            max_workers: parseInt(document.getElementById('maxWorkers').value, 10) || 8,
+                            max_linkedin_results: parseInt(document.getElementById('maxLinkedin').value, 10) || 20
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok || data.error) {
+                        throw new Error(data.error || 'Extraction failed.');
+                    }
+
+                    renderResults(data);
+                } catch (err) {
+                    errorAlert.textContent = 'Extraction error: ' + err.message;
+                    errorAlert.style.display = 'block';
+                } finally {
+                    loader.style.display = 'none';
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-play me-2"></i> Run Extraction';
+                    statusBadge.className = 'badge bg-success px-3 py-2';
+                    statusBadge.textContent = 'Completed';
+                }
+            });
+
+            function renderResults(data) {
+                globalEmails = data.all_emails || [];
+                globalLinkedinProfiles = data.linkedin_profiles || [];
+                const sites = data.sites_data || [];
+
+                document.getElementById('metricEmails').textContent = data.metrics.total_unique_emails_found || 0;
+                document.getElementById('metricDomains').textContent = data.metrics.total_domains_crawled || 0;
+                document.getElementById('metricTime').textContent = data.metrics.total_execution_time_formatted || '0s';
+                document.getElementById('metricLinkedin').textContent = data.metrics.total_linkedin_profiles_found || 0;
+                document.getElementById('metricSaved').textContent = data.metrics.profiles_saved_to_mongodb || 0;
+
+                // Render Extracted Emails
+                const emailList = document.getElementById('emailList');
+                if (globalEmails.length > 0) {
+                    emailList.innerHTML = globalEmails.map(e => `<span class="email-chip">${e}</span>`).join('');
+                } else {
+                    emailList.innerHTML = '<p class="text-muted small mb-0">No emails found for this query.</p>';
+                }
+
+                // Render LinkedIn Profiles
+                const linkedinList = document.getElementById('linkedinList');
+                if (globalLinkedinProfiles.length > 0) {
+                    linkedinList.innerHTML = globalLinkedinProfiles.map((p, idx) => {
+                        const hasPhone = p.contact_numbers && p.contact_numbers.length > 0;
+                        return `
+                            <div class="col-md-6">
+                                <div class="profile-item-card ${hasPhone ? 'has-phone' : ''}">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <h6 class="mb-1 text-dark fw-bold"><i class="fab fa-linkedin text-primary me-2"></i>${p.name || 'LinkedIn Profile'}</h6>
+                                        <button class="btn btn-sm btn-outline-primary" onclick="openProfileModal(${idx})">View Details</button>
+                                    </div>
+                                    <p class="small text-muted mb-2">${p.headline || p.snippet || 'No headline available'}</p>
+                                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                                        ${p.emails && p.emails.length ? `<span class="badge bg-success">${p.emails.join(', ')}</span>` : '<span class="badge bg-light text-muted border">No Email</span>'}
+                                        ${hasPhone ? `<span class="badge bg-info text-dark"><i class="fas fa-phone me-1"></i>${p.contact_numbers.join(', ')}</span>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    linkedinList.innerHTML = '<div class="col-12"><p class="text-muted small mb-0">No LinkedIn profiles found.</p></div>';
+                }
+
+                // Render Crawled Domains Breakdown
+                const domainList = document.getElementById('domainList');
+                if (sites.length > 0) {
+                    domainList.innerHTML = sites.map(s => `
+                        <div class="domain-item-card">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <a href="${s.website}" target="_blank" rel="noopener" class="fw-bold text-decoration-none">${s.domain}</a>
+                                <span class="badge bg-light text-dark border">${s.execution_time_seconds}s &middot; ${s.pages_visited ? s.pages_visited.length : 0} pages &middot; ${s.emails ? s.emails.length : 0} emails</span>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2">
+                                ${s.emails && s.emails.length > 0 ? s.emails.map(e => `<span class="badge bg-success bg-opacity-10 text-success border border-success">${e}</span>`).join('') : '<span class="text-muted small">No emails found on domain</span>'}
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    domainList.innerHTML = '<p class="text-muted small mb-0">No target domains crawled.</p>';
+                }
+
+                results.style.display = 'block';
+            }
+        });
+
+        function openProfileModal(index) {
+            const p = globalLinkedinProfiles[index];
+            if (!p) return;
+
+            document.getElementById('modalProfileName').textContent = p.name || 'LinkedIn Profile';
+            document.getElementById('modalProfileHeadline').textContent = p.headline || 'N/A';
+            document.getElementById('modalProfileEmails').innerHTML = (p.emails && p.emails.length) ? p.emails.map(e => `<span class="badge bg-success me-1">${e}</span>`).join('') : '<span class="text-muted">None Discovered</span>';
+            document.getElementById('modalProfilePhones').innerHTML = (p.contact_numbers && p.contact_numbers.length) ? p.contact_numbers.map(ph => `<span class="badge bg-info text-dark me-1">${ph}</span>`).join('') : '<span class="text-muted">None Discovered</span>';
+            document.getElementById('modalProfileSnippet').textContent = p.snippet || 'No bio snippet recorded.';
+            document.getElementById('modalProfileLink').href = p.profile_url || '#';
+
+            new bootstrap.Modal(document.getElementById('profileDetailModal')).show();
+        }
+
+        function copyAllEmails() {
+            if (globalEmails.length === 0) return;
+            navigator.clipboard.writeText(globalEmails.join('\n'));
+            alert('Copied ' + globalEmails.length + ' emails to clipboard!');
+        }
+    </script>
+</body>
+</html>

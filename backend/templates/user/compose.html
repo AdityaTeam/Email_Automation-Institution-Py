@@ -25,8 +25,8 @@
         .loading-overlay.active { display: flex; }
         .signature-section { border-top: 1px solid #eee; padding-top: 15px; margin-top: 15px; }
         .template-info { background: #e7f3ff; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9rem; }
-        .read-only-field { background-color: #e9ecef !important; cursor: not-allowed !important; }
         .signature-preview { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #dee2e6; font-family: monospace; white-space: pre-wrap; margin-top: 10px; }
+        .preview-rich-container { background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; max-height: 60vh; overflow-y: auto; }
     </style>
 </head>
 <body>
@@ -95,7 +95,7 @@
                                             </select>
                                         </div>
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-6">
                                         <div class="mb-3">
                                             <label class="form-label">CC Emails <small class="text-muted">(Select multiple)</small></label>
                                             <div class="dropdown">
@@ -110,8 +110,7 @@
                                         </div>
                                     </div>
 
-
-                                    <div class="col-md-4">
+                                    <div class="col-md-6">
                                         <div class="mb-3">
                                             <label class="form-label">Sender Name (From Name)</label>
                                             <input type="text" class="form-control" id="senderName" placeholder="e.g. Hansraj Ventures (defaults to {{ username }})">
@@ -124,18 +123,40 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- DYNAMIC TEMPLATE CONTENT FIELDS -->
+                        <div class="card" id="dynamicFieldsCard" style="display: none;">
+                            <div class="card-header"><i class="fas fa-sliders-h text-primary"></i> Template Content Customization</div>
+                            <div class="card-body">
+                                <div class="mb-3" id="bannerUploadGroup">
+                                    <label class="form-label fw-bold"><i class="fas fa-image me-1 text-primary"></i> Top Banner Image</label>
+                                    <input type="file" class="form-control" id="customBannerImage" accept="image/*">
+                                    <small class="text-muted">Upload an image file to dynamically update the top banner visually in real time.</small>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6 mb-3" id="linkUrlGroup">
+                                        <label class="form-label fw-bold"><i class="fas fa-link me-1 text-primary"></i> Button/Link URL</label>
+                                        <input type="url" class="form-control" id="customLinkUrl" placeholder="https://example.com/program">
+                                    </div>
+                                    <div class="col-md-6 mb-3" id="linkTextGroup">
+                                        <label class="form-label fw-bold"><i class="fas fa-font me-1 text-primary"></i> Button/Link Text</label>
+                                        <input type="text" class="form-control" id="customLinkText" placeholder="Visit Program Link →">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         
                         <div class="card">
                             <div class="card-header"><i class="fas fa-edit"></i> Email Content</div>
                             <div class="card-body">
                                 <div class="mb-3">
-                                    <label class="form-label">Subject <span class="badge bg-secondary">Read Only</span></label>
-                                    <input type="text" class="form-control read-only-field" id="emailSubject" readonly placeholder="Select a template">
+                                    <label class="form-label">Subject</label>
+                                    <input type="text" class="form-control" id="emailSubject" placeholder="Select a template or type custom subject">
                                 </div>
                                 <div class="mb-3">
-                                    <label class="form-label">Email Body <span class="badge bg-secondary">Read Only</span></label>
-                                    <small class="text-muted d-block mb-2">Use <code>{{name}}</code> for recipient name </small>
-                                    <textarea class="form-control read-only-field" id="emailBody" rows="10" readonly placeholder="Select a template"></textarea>
+                                    <label class="form-label">Email Body (Text or HTML)</label>
+                                    <small class="text-muted d-block mb-2">Use <code>{{name}}</code> for recipient name, <code>{{institute}}</code> for institute name</small>
+                                    <textarea class="form-control" id="emailBody" rows="10" placeholder="Select a template or type custom HTML/text..."></textarea>
                                 </div>
                                 
                                 <div class="signature-section">
@@ -191,8 +212,8 @@ Best Regards,
 [Executive Name]
 [Position]
 [Company Name]
-[Company Phone]
 [Company Email]
+[Company Phone]
 [Company Website]</div>
                                 </div>
                                 
@@ -268,13 +289,18 @@ Best Regards,
     <div class="modal fade" id="previewModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
-                <div class="modal-header"><h5 class="modal-title">Email Preview</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-eye text-primary me-2"></i>Email Preview</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
                 <div class="modal-body">
                     <div class="mb-3"><strong>Subject:</strong> <span id="previewSubject"></span></div>
                     <hr>
-                    <div id="previewBody" style="white-space: pre-wrap;"></div>
+                    <div id="previewBody" class="preview-rich-container"></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
             </div>
         </div>
     </div>
@@ -284,8 +310,9 @@ Best Regards,
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let recipients = [];
+        let uploadedBannerDataUrl = null;
+        let ccCheckboxes = [];
         
-        // Update signature preview when fields change
         function updateSignaturePreview() {
             const name = document.getElementById('executiveName').value || '[Executive Name]';
             const position = document.getElementById('position').value || '[Position]';
@@ -298,8 +325,8 @@ Best Regards,
 ${name}
 ${position}
 ${companyName}
-${companyEmail}
 ${companyPhone}
+${companyEmail}
 ${companyWebsite}`;
             
             document.getElementById('signaturePreview').textContent = preview;
@@ -307,6 +334,18 @@ ${companyWebsite}`;
         
         ['executiveName', 'position', 'companyName', 'companyEmail', 'companyPhone', 'companyWebsite'].forEach(id => {
             document.getElementById(id).addEventListener('input', updateSignaturePreview);
+        });
+
+        // Banner File Upload Handler
+        document.getElementById('customBannerImage').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    uploadedBannerDataUrl = evt.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
         });
         
         document.getElementById('requirementSelect').addEventListener('change', async function() {
@@ -325,6 +364,9 @@ ${companyWebsite}`;
                         option.textContent = t.name;
                         option.dataset.subject = t.subject;
                         option.dataset.body = t.body;
+                        if (t.attachments && t.attachments.length > 0) {
+                            option.dataset.attachments = JSON.stringify(t.attachments);
+                        }
                         templateSelect.appendChild(option);
                     });
                 }
@@ -333,14 +375,93 @@ ${companyWebsite}`;
         
         document.getElementById('templateSelect').addEventListener('change', function() {
             const selectedOption = this.options[this.selectedIndex];
+            const dynamicCard = document.getElementById('dynamicFieldsCard');
+
             if (selectedOption && selectedOption.value) {
-                document.getElementById('emailSubject').value = selectedOption.dataset.subject;
-                document.getElementById('emailBody').value = selectedOption.dataset.body;
+                const bodyContent = selectedOption.dataset.body || '';
+                document.getElementById('emailSubject').value = selectedOption.dataset.subject || '';
+                document.getElementById('emailBody').value = bodyContent;
+                
+                // Show dynamic customization inputs for HTML / Layout templates
+                if (bodyContent.includes('<img') || bodyContent.includes('<a') || bodyContent.includes('<table') || bodyContent.includes('<!DOCTYPE html')) {
+                    dynamicCard.style.display = 'block';
+                    document.getElementById('htmlFormat').checked = true;
+                } else {
+                    dynamicCard.style.display = 'none';
+                }
+
                 document.getElementById('templateInfo').style.display = 'block';
-                document.getElementById('templateInfoText').textContent = 'Template loaded. Subject and body are read-only. Edit the "Best Regards" section below.';
+                document.getElementById('templateInfoText').textContent = 'Template loaded. You can edit subject, text, image, links, and signature details before sending.';
             } else {
+                dynamicCard.style.display = 'none';
                 document.getElementById('templateInfo').style.display = 'none';
             }
+        });
+
+        function getCompiledBody() {
+            let rawBody = document.getElementById('emailBody').value;
+            const bannerImg = uploadedBannerDataUrl || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=1200&q=80';
+            const linkUrl = document.getElementById('customLinkUrl').value.trim();
+            const linkText = document.getElementById('customLinkText').value.trim();
+
+            // Replace broken cid image references with live image src
+            rawBody = rawBody.replace(/src="[^"]*cid:banner_image[^"]*"/gi, `src="${bannerImg}"`);
+            
+            // Replace custom URL if provided
+            if (linkUrl) {
+                rawBody = rawBody.replace(/href="[^"]*"/gi, `href="${linkUrl}"`);
+            }
+
+            // Replace link text if provided
+            if (linkText) {
+                rawBody = rawBody.replace(/Visit Program Link &rarr;/gi, linkText)
+                                 .replace(/Visit Program Link →/gi, linkText);
+            }
+
+            return rawBody;
+        }
+
+        document.getElementById('previewBtn').addEventListener('click', function() {
+            const subject = document.getElementById('emailSubject').value;
+            const isHtml = document.getElementById('htmlFormat').checked;
+
+            if (!subject) {
+                showAlert('warning', 'Please enter a subject or select a template');
+                return;
+            }
+
+            const executiveName = document.getElementById('executiveName').value || '[Executive Name]';
+            const position = document.getElementById('position').value || '[Position]';
+            const companyName = document.getElementById('companyName').value || '[Company Name]';
+            const companyPhone = document.getElementById('companyPhone').value || '[Company Phone]';
+            const companyEmail = document.getElementById('companyEmail').value || '[Company Email]';
+            const companyWebsite = document.getElementById('companyWebsite').value || '[Company Website]';
+
+            document.getElementById('previewSubject').textContent = subject;
+            const previewContainer = document.getElementById('previewBody');
+
+            if (isHtml) {
+                const compiledBody = getCompiledBody();
+                const htmlSignature = `
+                    <div style="margin-top: 25px; padding-top: 15px; border-top: 1px dashed #cccccc; color: #555555; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.5;">
+                        <strong>Best Regards,</strong><br>
+                        ${executiveName}<br>
+                        ${position}<br>
+                        <strong>${companyName}</strong><br>
+                        Phone: ${companyPhone}<br>
+                        Email: <a href="mailto:${companyEmail}" style="color: #4a90d9;">${companyEmail}</a><br>
+                        Web: <a href="http://${companyWebsite}" target="_blank" style="color: #4a90d9;">${companyWebsite}</a>
+                    </div>
+                `;
+                previewContainer.style.whiteSpace = 'normal';
+                previewContainer.innerHTML = compiledBody + htmlSignature;
+            } else {
+                previewContainer.style.whiteSpace = 'pre-wrap';
+                const plainSignature = `\n\nBest Regards,\n${executiveName}\n${position}\n${companyName}\n${companyPhone}\n${companyEmail}\n${companyWebsite}`;
+                previewContainer.textContent = document.getElementById('emailBody').value + plainSignature;
+            }
+
+            new bootstrap.Modal(document.getElementById('previewModal')).show();
         });
         
         document.getElementById('fileSelect').addEventListener('change', async function() {
@@ -446,57 +567,21 @@ ${companyWebsite}`;
             container.style.display = 'block';
         }
         
-        document.getElementById('previewBtn').addEventListener('click', function() {
-            const subject = document.getElementById('emailSubject').value;
-            let body = document.getElementById('emailBody').value;
-
-            if (!subject || !body) {
-                showAlert('warning', 'Please select a template');
-                return;
-            }
-
-            const signature = document.getElementById('signaturePreview').textContent;
-            body += '\n\n' + signature;
-
-            let previewSubject = subject;
-            let previewBody = body;
-
-            document.getElementById('previewSubject').textContent = previewSubject;
-            document.getElementById('previewBody').textContent = previewBody;
-
-            // show attachments count in preview if template selected
-            const tmpl = document.getElementById('templateSelect').value;
-            if (tmpl) {
-                const attachInfo = document.getElementById('previewAttachInfo');
-                if (!attachInfo) {
-                    const p = document.createElement('p');
-                    p.id = 'previewAttachInfo';
-                    p.className = 'mt-2';
-                    p.innerHTML = '<em>(Attachments from selected template will be included)</em>';
-                    document.getElementById('previewBody').parentNode.insertBefore(p, document.getElementById('previewBody').nextSibling);
-                }
-            }
-
-            new bootstrap.Modal(document.getElementById('previewModal')).show();
-        });
-        
         document.getElementById('sendBtn').addEventListener('click', async function() {
             const senderEmailId = document.getElementById('senderSelect').value;
             const fileId = document.getElementById('fileSelect').value;
             const subject = document.getElementById('emailSubject').value;
-            let body = document.getElementById('emailBody').value;
             const isHtml = document.getElementById('htmlFormat').checked;
             const ccEmailsHidden = document.getElementById('ccEmailsHidden').value;
             const ccEmails = ccEmailsHidden ? ccEmailsHidden.split(',').filter(email => email.trim()) : [];
             
             if (!senderEmailId) { showAlert('warning', 'Please select a sender email'); return; }
             if (!fileId) { showAlert('warning', 'Please select a recipients file'); return; }
-            if (!subject || !body) { showAlert('warning', 'Please select a template'); return; }
+            if (!subject) { showAlert('warning', 'Please provide an email subject'); return; }
             
-            // Get sender name
+            const body = isHtml ? getCompiledBody() : document.getElementById('emailBody').value;
             const senderName = document.getElementById('senderName').value.trim() || '{{ username }}';
             
-            // Get signature data - backend will add signature
             const signatureData = {
                 executive_name: document.getElementById('executiveName').value,
                 position: document.getElementById('position').value,
@@ -505,9 +590,6 @@ ${companyWebsite}`;
                 company_phone: document.getElementById('companyPhone').value,
                 company_website: document.getElementById('companyWebsite').value
             };
-            
-            // DO NOT add signature here - backend will handle it
-            // This prevents duplicate "Best Regards" in sent emails
             
             setSendingState(true);
             document.getElementById('progressCard').style.display = 'block';
@@ -521,7 +603,6 @@ ${companyWebsite}`;
             
             try {
                 const selectedTemplate = document.getElementById('templateSelect').value;
-                console.log('Sending with CC:', ccEmails);
                 
                 const response = await fetch('/api/send', {
                     method: 'POST',
@@ -530,7 +611,7 @@ ${companyWebsite}`;
                         sender_email_id: senderEmailId,
                         from_name: senderName,
                         recipients: recipients,
-                        cc_emails: ccEmails,  // ✅ Fixed: Use actual CC selection
+                        cc_emails: ccEmails,
                         template_id: selectedTemplate,
                         subject: subject,
                         body: body,
@@ -570,21 +651,15 @@ ${companyWebsite}`;
             }
         });
         
-        // ✅ FIXED: Populate CC dropdown checkboxes
-        let ccCheckboxes = []; // Track checkboxes for selection management
-        
         async function populateCcDropdown() {
             const menu = document.getElementById('ccDropdownMenu');
-            const countEl = document.getElementById('ccSelectedCount');
-            const hiddenInput = document.getElementById('ccEmailsHidden');
+            ccCheckboxes = [];
             
             try {
                 const response = await fetch('/api/cc-emails');
                 const data = await response.json();
-                console.log('CC API response:', data); // Debug
                 
-                menu.innerHTML = ''; // Clear existing
-                ccCheckboxes = [];
+                menu.innerHTML = '';
                 
                 if (data.cc_emails && data.cc_emails.length > 0) {
                     data.cc_emails.forEach((cc, index) => {
@@ -600,19 +675,14 @@ ${companyWebsite}`;
                         `;
                         menu.appendChild(li);
                         
-                        // Store checkbox reference
                         const checkbox = li.querySelector('.cc-checkbox');
                         ccCheckboxes.push(checkbox);
-                        
-                        // Add change listener
                         checkbox.addEventListener('change', updateCcSelection);
                     });
-                    console.log(`✅ Loaded ${data.cc_emails.length} CC emails`);
                 } else {
                     menu.innerHTML = '<li class="dropdown-item text-center text-muted p-3">No CC emails available</li>';
-                    console.log('No CC emails found');
                 }
-                updateCcSelection(); // Initial count
+                updateCcSelection();
             } catch (error) {
                 console.error('Error loading CC emails:', error);
                 menu.innerHTML = '<li class="dropdown-item text-center text-danger p-3">Failed to load CC emails</li>';
@@ -626,8 +696,6 @@ ${companyWebsite}`;
             
             countEl.textContent = `${selected.length} selected`;
             hiddenInput.value = selected.map(cb => cb.value).join(',');
-            
-            console.log(`CC selection: ${selected.length} emails - ${hiddenInput.value}`);
         }
 
         document.addEventListener('DOMContentLoaded', function() {
@@ -644,4 +712,3 @@ ${companyWebsite}`;
     </script>
 </body>
 </html>
-
