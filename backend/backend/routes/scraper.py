@@ -1,28 +1,43 @@
 """
-Scraper Routes & Extraction Engine
-Handles public website crawling, DuckDuckGo SERP lookups, and LinkedIn profile extraction.
-Now stores user association for all scraped profiles and runs.
+LinkedIn Profile Scraper (keyword-accurate, LinkedIn-sourced contact info only)
+
+Pipeline:
+  1. Query Google / Bing / Yahoo / DuckDuckGo restricted to site:linkedin.com/in
+  2. Keep ONLY profiles whose headline / indexed bio actually contains the keyword
+     (word-boundary matching, ALL terms required, synonym aware: gen ai = generative ai = genai)
+  3. Reject "sales / marketing / lead-gen" profiles unless the keyword sits in their headline
+  4. Extract email / phone ONLY from the LinkedIn result itself (title + snippet of the
+     linkedin.com/in page). No third-party websites are crawled or merged.
 """
 
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
 import os
 import re
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse, urljoin, quote_plus, unquote
 
 import requests
 import urllib3
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from dotenv import load_dotenv
 from pymongo import MongoClient, UpdateOne
 from pymongo.errors import PyMongoError
+
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 try:
     from ddgs import DDGS
 except ImportError:
     from duckduckgo_search import DDGS
+
+try:
+    from googlesearch import search as google_search
+    HAS_GOOGLESEARCH_LIB = True
+except ImportError:
+    HAS_GOOGLESEARCH_LIB = False
 
 scraper_bp = Blueprint('scraper', __name__)
 load_dotenv()
@@ -31,25 +46,59 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB_NAME = os.getenv("MONGO_DB", "signal_scraper")
 
-EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-PHONE_REGEX = r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{3,5}\)?[-.\s]?\d{3,5}[-.\s]?\d{3,5}'
+HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
+}
+
+# ------------------------------------------------------------------------------
+# Relevance configuration
+# ------------------------------------------------------------------------------
+
+# Roles that are NOT wanted unless the searched keyword itself is in the headline.
+DISQUALIFY_KEYWORDS = (
+    "lead generation", "lead gen", "market lead", "marketing", "sales",
+    "real estate", "recruiter", "recruitment", "talent acquisition",
+    "business development", "digital marketing", "seo",
+)
+
+STOPWORDS = {"a", "an", "and", "at", "for", "in", "of", "or", "the", "to", "with", "on"}
+
+# Concept rules: (regex found in the user's query, regex used to match profiles).
+# Lets "gen ai" also match "Generative AI", "GenAI", "Gen-AI", etc.
+CONCEPT_RULES = [
+    (re.compile(r"\bgen(?:erative)?[\s\-]?ai\b", re.I),
+     r"gen(?:erative)?[\s\-]?ai"),
+    (re.compile(r"\b(?:ml|machine[\s\-]?learning)\b", re.I),
+     r"(?:ml|machine[\s\-]?learning)"),
+    (re.compile(r"\b(?:llms?|large[\s\-]language[\s\-]models?)\b", re.I),
+     r"(?:llms?|large[\s\-]language[\s\-]models?)"),
+    (re.compile(r"\b(?:nlp|natural[\s\-]language[\s\-]processing)\b", re.I),
+     r"(?:nlp|natural[\s\-]language[\s\-]processing)"),
+]
+
+# Alternate spellings used to widen the SEARCH (matching is still strict afterwards).
+SEARCH_PHRASE_ALTERNATES = {
+    "gen ai": ["generative ai", "genai"],
+    "genai": ["generative ai", "gen ai"],
+    "generative ai": ["genai", "gen ai"],
+}
 
 IGNORED_SERP_DOMAINS = (
     "google.", "gstatic.com", "youtube.com", "bing.com", "microsoft.com",
     "duckduckgo.com", "yahoo.com", "schema.org", "wikipedia.org", "w3.org",
-    "facebook.com", "twitter.com", "instagram.com", "linkedin.com"
+    "facebook.com", "twitter.com", "instagram.com", "linkedin.com",
 )
-
 NON_PAGE_SCHEMES = ("mailto:", "tel:", "javascript:", "#")
-IGNORED_EMAIL_DOMAINS = ("linkedin.com", "licdn.com", "example.com", "sentry.io")
-IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.ico', '.pdf', '.css', '.js')
-
-HTTP_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Accept-Language": "en-US,en;q=0.9",
-}
 
 _mongo_client = None
+
+
+# ==============================================================================
+# SECTION: DATABASE
+# ==============================================================================
 
 def get_db():
     global _mongo_client
@@ -65,9 +114,6 @@ def get_db():
 
 
 def save_to_mongo(query: str, user_id: str, profiles: list[dict], sites: list[dict], metrics: dict) -> dict:
-    """
-    Store all profiles, domain data, and scrape run history bound to the executing user_id.
-    """
     db = get_db()
     now = datetime.now(timezone.utc)
 
@@ -75,38 +121,26 @@ def save_to_mongo(query: str, user_id: str, profiles: list[dict], sites: list[di
         UpdateOne(
             {"profile_url": p["profile_url"]},
             {
-                "$set": {
-                    **p,
-                    "last_query": query,
-                    "last_scraped_at": now,
-                    "scraped_by_user_id": user_id
-                },
+                "$set": {**p, "last_query": query, "last_scraped_at": now, "scraped_by_user_id": user_id},
                 "$addToSet": {"scraped_by_users": user_id},
-                "$setOnInsert": {"first_scraped_at": now}
+                "$setOnInsert": {"first_scraped_at": now},
             },
             upsert=True,
         )
         for p in profiles if p.get("profile_url")
     ]
-    
     site_ops = [
         UpdateOne(
-            {"domain": s["domain"]},
+            {"domain": x["domain"]},
             {
-                "$set": {
-                    **s,
-                    "last_query": query,
-                    "last_scraped_at": now,
-                    "scraped_by_user_id": user_id
-                },
+                "$set": {**x, "last_query": query, "last_scraped_at": now, "scraped_by_user_id": user_id},
                 "$addToSet": {"scraped_by_users": user_id},
-                "$setOnInsert": {"first_scraped_at": now}
+                "$setOnInsert": {"first_scraped_at": now},
             },
             upsert=True,
         )
-        for s in sites if s.get("domain")
+        for x in sites if x.get("domain")
     ]
-
     if profile_ops:
         db.linkedin_profiles.bulk_write(profile_ops, ordered=False)
     if site_ops:
@@ -117,93 +151,241 @@ def save_to_mongo(query: str, user_id: str, profiles: list[dict], sites: list[di
         "query": query,
         "metrics": metrics,
         "linkedin_profile_urls": [p["profile_url"] for p in profiles],
-        "domains": [s["domain"] for s in sites],
+        "domains": [x["domain"] for x in sites],
         "created_at": now,
     })
-
-    return {
-        "run_id": str(run.inserted_id),
-        "linkedin_profiles_saved": len(profile_ops),
-        "sites_saved": len(site_ops),
-    }
+    return {"run_id": str(run.inserted_id), "linkedin_profiles_saved": len(profile_ops),
+            "sites_saved": len(site_ops)}
 
 
-def fetch_serp_urls(query: str, max_results: int = 50) -> list[str]:
-    discovered_urls = set()
+# ==============================================================================
+# SECTION: SEARCH ENGINES
+# ==============================================================================
 
-    def parse_results(results_list):
-        for result in results_list:
-            href = result.get("href") or result.get("url") or ""
-            if not href.startswith("http"):
-                continue
-            parsed = urlparse(href)
-            domain = parsed.netloc.lower()
-
-            if any(ignored in domain for ignored in IGNORED_SERP_DOMAINS):
-                continue
-
-            if parsed.scheme in ("http", "https") and domain:
-                base_domain_url = f"{parsed.scheme}://{domain}"
-                discovered_urls.add(base_domain_url)
-
+def _search_duckduckgo(query: str, max_results: int = 30) -> list[dict]:
+    results = []
     try:
         with DDGS() as ddgs:
-            raw_results = list(ddgs.text(query, max_results=max_results))
-            parse_results(raw_results)
-
-            if not discovered_urls and '"' in query:
-                clean_query = query.replace('"', '')
-                raw_results = list(ddgs.text(clean_query, max_results=max_results))
-                parse_results(raw_results)
+            for r in list(ddgs.text(query, max_results=max_results)):
+                href = r.get("href") or r.get("url") or ""
+                if href.startswith("http"):
+                    results.append({"url": href, "title": r.get("title", ""),
+                                    "snippet": r.get("body", ""), "engine": "DuckDuckGo"})
     except Exception as e:
-        print(f"[!] Warning during DDGS search execution: {e}")
-
-    return sorted(list(discovered_urls))
-
-
-def _valid_phone(raw: str) -> str | None:
-    if not raw:
-        return None
-    raw_clean = re.sub(r'\s+', ' ', raw.strip(' .-–:()'))
-    digits = re.sub(r'\D', '', raw_clean)
-    
-    if not 10 <= len(digits) <= 13:
-        return None
-    if len(set(digits)) <= 2:
-        return None
-    if digits in "01234567890123456789" or digits in "98765432109876543210":
-        return None
-    return raw_clean
+        print(f"[!] DuckDuckGo Engine Warning: {e}")
+    return results
 
 
-def _extract_phones(*texts: str) -> set[str]:
-    found = set()
-    for text in texts:
-        if not text:
+def _search_google(query: str, max_results: int = 30) -> list[dict]:
+    results = []
+    try:
+        if HAS_GOOGLESEARCH_LIB:
+            for hit in google_search(query, num_results=max_results, advanced=True):
+                href = getattr(hit, 'url', str(hit))
+                if href.startswith("http"):
+                    results.append({"url": href, "title": getattr(hit, 'title', '') or '',
+                                    "snippet": getattr(hit, 'description', '') or '', "engine": "Google"})
+        else:
+            url = f"https://www.google.com/search?q={quote_plus(query)}&num={max_results}"
+            resp = requests.get(url, headers=HTTP_HEADERS, timeout=6)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                for g in soup.select("div.g"):
+                    link = g.select_one("a[href]")
+                    title = g.select_one("h3")
+                    snippet = g.select_one(".VwiC3b") or g.select_one(".st")
+                    if link and link.get("href", "").startswith("http"):
+                        results.append({"url": link["href"], "title": title.text if title else "",
+                                        "snippet": snippet.text if snippet else "", "engine": "Google"})
+    except Exception as e:
+        print(f"[!] Google Engine Warning: {e}")
+    return results
+
+
+def _search_bing(query: str, max_results: int = 30) -> list[dict]:
+    results = []
+    headers = {**HTTP_HEADERS, "Referer": "https://www.bing.com/"}
+    try:
+        url = f"https://www.bing.com/search?q={quote_plus(query)}&count={max_results}"
+        resp = requests.get(url, headers=headers, timeout=8)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for item in soup.select("li.b_algo"):
+                title_elem = item.select_one("h2 a")
+                snippet_elem = item.select_one(".b_caption p") or item.select_one("p")
+                if title_elem and title_elem.get("href", "").startswith("http"):
+                    href = title_elem["href"]
+                    if "bing.com" not in href and "msn.com" not in href:
+                        results.append({"url": href, "title": title_elem.text,
+                                        "snippet": snippet_elem.text if snippet_elem else "", "engine": "Bing"})
+    except Exception as e:
+        print(f"[!] Bing Engine Error: {e}")
+    return results
+
+
+def _search_yahoo(query: str, max_results: int = 30) -> list[dict]:
+    results = []
+    sess = requests.Session()
+    sess.headers.update(HTTP_HEADERS)
+    try:
+        url = f"https://search.yahoo.com/search?p={quote_plus(query)}&n={max_results}"
+        resp = sess.get(url, timeout=8)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for item in soup.select("div.algo"):
+                title_elem = item.select_one("h3.title a")
+                snippet_elem = item.select_one("div.compText") or item.select_one("p")
+                if title_elem and title_elem.get("href", "").startswith("http"):
+                    raw_url = title_elem["href"]
+                    if "/RU=" in raw_url:
+                        m = re.search(r'/RU=([^/]+)/', raw_url)
+                        if m:
+                            raw_url = unquote(m.group(1))
+                    if "yahoo.com" not in raw_url:
+                        results.append({"url": raw_url, "title": title_elem.text,
+                                        "snippet": snippet_elem.text if snippet_elem else "", "engine": "Yahoo"})
+    except Exception:
+        pass
+    return results
+
+
+# ==============================================================================
+# SECTION: KEYWORD MATCHING (the part that fixes irrelevant profiles)
+# ==============================================================================
+
+def _build_requirements(query: str) -> list[str]:
+    """
+    Turn the query into an ORDERED list of regex fragments (one per concept/word).
+    'gen ai engineer' -> ['gen(?:erative)?[\\s\\-]?ai', 'engineer\\w*']
+    """
+    text = query.lower().replace('"', ' ')
+    found: list[tuple[int, str]] = []
+
+    for rule_re, profile_pattern in CONCEPT_RULES:
+        for m in rule_re.finditer(text):
+            found.append((m.start(), profile_pattern))
+            text = text[:m.start()] + " " * (m.end() - m.start()) + text[m.end():]  # mask span
+
+    for m in re.finditer(r"[a-z0-9+#.]+", text):
+        tok = m.group(0)
+        if tok in STOPWORDS or len(tok) < 2:
             continue
-        for m in re.finditer(PHONE_REGEX, text):
-            v = _valid_phone(m.group(0))
-            if v:
-                found.add(v)
-    return found
+        esc = re.escape(tok)
+        found.append((m.start(), esc + (r"\w*" if len(tok) >= 5 else r"s?")))
+
+    found.sort(key=lambda x: x[0])
+    return [p for _, p in found]
+
+
+_B_L, _B_R = r"(?<![a-z0-9])", r"(?![a-z0-9])"
+
+
+def _all_match(text: str, frags: list[str]) -> bool:
+    """Every term present somewhere in text (whole-word)."""
+    return bool(frags) and bool(text) and all(
+        re.search(_B_L + f + _B_R, text, re.I) for f in frags
+    )
+
+
+def _phrase_match(text: str, frags: list[str]) -> bool:
+    """Terms appear contiguously, in order (e.g. 'Gen AI Engineer', 'GenAI engineers')."""
+    if not frags or not text:
+        return False
+    return re.search(_B_L + r"[\s\-]+".join(frags) + _B_R, text, re.I) is not None
+
+
+def _contains_word(text: str, phrase: str) -> bool:
+    return re.search(r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])", text, re.I) is not None
+
+
+def _relevance_score(headline: str, snippet: str, query: str) -> tuple[int, str]:
+    """
+    Returns (score, matched_in). score 0 = reject.
+      3 -> every query term is in the headline
+      2 -> the exact keyword phrase (synonym aware) is in the indexed bio
+    Terms scattered across a long bio (e.g. 'Software Engineer ... Skills: Generative AI')
+    are NOT enough, so unrelated profiles are dropped.
+    """
+    frags = _build_requirements(query)
+    headline = headline or ""
+    snippet = snippet or ""
+    q_low = query.lower()
+
+    in_headline = _all_match(headline, frags)
+    in_bio = _phrase_match(snippet, frags) or _phrase_match(f"{headline} {snippet}", frags)
+    if not (in_headline or in_bio):
+        return 0, ""
+
+    # Reject marketing / sales / lead-gen profiles unless the keyword is in the headline
+    # or the user is explicitly searching for that kind of role.
+    if not in_headline:
+        for bad in DISQUALIFY_KEYWORDS:
+            if _contains_word(headline, bad) and bad not in q_low:
+                return 0, ""
+
+    return (3, "headline") if in_headline else (2, "bio")
+
+
+# ==============================================================================
+# SECTION: CONTACT EXTRACTION (from LinkedIn result text only)
+# ==============================================================================
+
+EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}'
+IGNORED_EMAIL_DOMAINS = ("linkedin.com", "licdn.com", "example.com", "sentry.io")
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.ico', '.pdf', '.css', '.js')
+
+PHONE_PATTERNS = [
+    re.compile(r"(?<![\w+])\+\d{1,3}[\s.-]?\(?\d{1,5}\)?(?:[\s.-]?\d{2,5}){2,4}(?!\d)"),   # +91 98765 43210
+    re.compile(r"(?<!\d)[6-9]\d{4}[\s.-]?\d{5}(?!\d)"),                                    # Indian mobile
+    re.compile(r"(?<!\d)\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}(?!\d)"),                         # 123-456-7890
+]
 
 
 def _valid_email(email: str) -> bool:
     email = email.lower().strip()
     if any(email.endswith(ext) for ext in IMAGE_EXTENSIONS):
         return False
-    domain = email.rsplit("@", 1)[-1].lower()
+    domain = email.rsplit("@", 1)[-1]
     return not any(domain == d or domain.endswith("." + d) for d in IGNORED_EMAIL_DOMAINS)
 
 
-def _extract_emails_strict(*texts: str) -> set[str]:
+def _extract_emails(*texts: str) -> set[str]:
     found = set()
     for text in texts:
-        for m in re.findall(EMAIL_REGEX, text or "", re.IGNORECASE):
+        if not text:
+            continue
+        normalized = re.sub(r'\s*[\[(]\s*at\s*[\])]\s*', '@', text, flags=re.I)
+        normalized = re.sub(r'\s*[\[(]\s*dot\s*[\])]\s*', '.', normalized, flags=re.I)
+        for m in re.findall(EMAIL_REGEX, normalized):
             m = m.lower().rstrip(".")
             if _valid_email(m):
                 found.add(m)
     return found
+
+
+def _valid_phone(raw: str) -> str | None:
+    clean = re.sub(r'\s+', ' ', raw.strip(' .-–:()'))
+    digits = re.sub(r'\D', '', clean)
+    if not 10 <= len(digits) <= 13:
+        return None
+    if len(set(digits)) <= 2:
+        return None
+    if digits in "01234567890123456789" or digits in "98765432109876543210":
+        return None
+    return clean
+
+
+def _extract_phones(*texts: str) -> set[str]:
+    found: dict[str, str] = {}   # digits -> display form (dedupes formatting variants)
+    for text in texts:
+        if not text:
+            continue
+        for pat in PHONE_PATTERNS:
+            for m in pat.finditer(text):
+                v = _valid_phone(m.group(0))
+                if v:
+                    found.setdefault(re.sub(r'\D', '', v)[-10:], v)
+    return set(found.values())
 
 
 def _clean_profile_name(raw_name: str) -> str:
@@ -211,214 +393,248 @@ def _clean_profile_name(raw_name: str) -> str:
         return "LinkedIn Profile"
     clean = re.sub(r'\(?[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\)?', '', raw_name)
     clean = clean.strip(' -–—()')
-    return clean if clean else "LinkedIn Profile"
+    return clean or "LinkedIn Profile"
+
+
+def _normalize_profile_url(href: str) -> str | None:
+    """in.linkedin.com/in/x?trk=.. -> https://www.linkedin.com/in/x (dedupes country subdomains)."""
+    m = re.search(r"linkedin\.com/in/([^/?#\s]+)", href, re.I)
+    if not m:
+        return None
+    return f"https://www.linkedin.com/in/{unquote(m.group(1)).lower()}"
+
+
+# ==============================================================================
+# SECTION: LINKEDIN DISCOVERY
+# ==============================================================================
+
+def _search_phrases(query: str) -> list[str]:
+    q = query.strip().replace('"', '')
+    phrases = [q]
+    ql = q.lower()
+    for key, alts in SEARCH_PHRASE_ALTERNATES.items():
+        if re.search(r"(?<![a-z0-9])" + re.escape(key) + r"(?![a-z0-9])", ql):
+            for alt in alts:
+                p = re.sub(re.escape(key), alt, ql, flags=re.I)
+                if p not in phrases:
+                    phrases.append(p)
+            break
+    return phrases[:3]
+
+
+def _run_engines(q: str, max_results: int) -> list[dict]:
+    items = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(fn, q, max_results)
+                   for fn in (_search_duckduckgo, _search_google, _search_bing, _search_yahoo)]
+        for f in as_completed(futures):
+            try:
+                items.extend(f.result())
+            except Exception:
+                pass
+    return items
 
 
 def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dict], int]:
-    variants = [
-        f"site:linkedin.com/in {query}",
-        f'site:linkedin.com/in {query} "email" OR "gmail.com" OR "contact"',
-        f'site:linkedin.com/in {query} "phone" OR "mobile" OR "+91"',
-    ]
+    phrases = _search_phrases(query)
+    primary = phrases[0]
+
+    variants = [f'site:linkedin.com/in "{p}"' for p in phrases]
+    # Extra queries nudging results that mention contact details in the profile text
+    variants.append(f'site:linkedin.com/in "{primary}" "email" OR "gmail.com" OR "@"')
+    variants.append(f'site:linkedin.com/in "{primary}" "phone" OR "mobile" OR "+91"')
 
     candidates: dict[str, dict] = {}
-    try:
-        with DDGS() as ddgs:
-            for q in variants:
-                try:
-                    results = list(ddgs.text(q, max_results=max_results))
-                except Exception:
-                    continue
-                for result in results:
-                    href = result.get("href") or result.get("url") or ""
-                    if "linkedin.com/in/" not in href.lower():
-                        continue
-                    clean_url = href.split("?")[0].rstrip("/")
-                    if clean_url in candidates:
-                        continue
-                    raw_title = (result.get("title") or "").strip()
-                    title_parts = re.split(r"\s[-|]\s", raw_title, maxsplit=1)
-                    headline = title_parts[1].strip() if len(title_parts) > 1 else None
-                    snippet = (result.get("body") or "").strip()
-                    
-                    parsed_name = _clean_profile_name(title_parts[0].strip())
-                    candidates[clean_url] = {
-                        "name": parsed_name,
-                        "headline": headline,
-                        "profile_url": clean_url,
-                        "snippet": snippet,
-                        "_raw_title": raw_title,
-                    }
-                time.sleep(0.3)
-    except Exception as e:
-        print(f"[!] Warning during LinkedIn search execution: {e}")
+    scanned = 0
+
+    for q in variants:
+        for item in _run_engines(q, max_results):
+            url = _normalize_profile_url(item.get("url", ""))
+            if not url:
+                continue
+            scanned += 1
+
+            raw_title = (item.get("title") or "").strip()
+            snippet = (item.get("snippet") or "").strip()
+
+            parts = re.split(r"\s[-–|]\s", raw_title, maxsplit=1)
+            name = _clean_profile_name(parts[0].strip())
+            headline = parts[1].strip() if len(parts) > 1 else None
+            if headline:
+                headline = re.sub(r"\s*[|\-–]\s*LinkedIn\s*$", "", headline, flags=re.I).strip() or None
+
+            score, matched_in = _relevance_score(headline, snippet, query)
+            if score == 0:
+                continue
+
+            entry = candidates.get(url)
+            if entry is None:
+                candidates[url] = {
+                    "name": name, "headline": headline, "profile_url": url,
+                    "snippet": snippet, "_texts": {raw_title, snippet},
+                    "relevance_score": score, "matched_in": matched_in,
+                    "engine": item.get("engine", "Search Engine"),
+                }
+            else:
+                # Same profile seen again -> merge (a different snippet may expose an email/phone)
+                entry["_texts"].update({raw_title, snippet})
+                if len(snippet) > len(entry["snippet"]):
+                    entry["snippet"] = snippet
+                if not entry["headline"] and headline:
+                    entry["headline"] = headline
+                if score > entry["relevance_score"]:
+                    entry["relevance_score"], entry["matched_in"] = score, matched_in
+        time.sleep(0.2)
 
     profiles = []
     for c in candidates.values():
-        emails = _extract_emails_strict(c["snippet"], c["_raw_title"])
-        phones = _extract_phones(c["snippet"], c["_raw_title"])
+        texts = [t for t in c.pop("_texts") if t]
+        emails = _extract_emails(*texts)
+        phones = _extract_phones(*texts)
         profiles.append({
-            "name": c["name"],
-            "headline": c["headline"],
-            "profile_url": c["profile_url"],
-            "snippet": c["snippet"],
+            **c,
             "emails": sorted(emails),
             "contact_number": sorted(phones)[0] if phones else None,
             "contact_numbers": sorted(phones),
+            "contact_source": "linkedin_profile_text",
         })
 
-    def priority_score(p):
-        has_email = len(p["emails"]) > 0
-        has_phone = len(p["contact_numbers"]) > 0
-        if has_email and has_phone:
-            return 3
-        elif has_phone:
-            return 2
-        elif has_email:
-            return 1
-        return 0
+    def sort_key(p):
+        contact = (2 if p["emails"] else 0) + (1 if p["contact_numbers"] else 0)
+        return (p["relevance_score"], contact)
 
-    profiles.sort(key=priority_score, reverse=True)
-    return profiles, len(candidates)
+    profiles.sort(key=sort_key, reverse=True)
+    return profiles, scanned
+
+
+# ==============================================================================
+# SECTION: WEBSITE DISCOVERY & CRAWLING (shown separately from LinkedIn data)
+# ==============================================================================
+
+def fetch_serp_urls(query: str, max_results: int = 30) -> list[str]:
+    """Base URLs of the websites ranking for the query (LinkedIn/social/search domains excluded)."""
+    found = set()
+    for item in _run_engines(query, max_results):
+        href = item.get("url", "")
+        parsed = urlparse(href)
+        domain = parsed.netloc.lower()
+        if not href.startswith("http") or not domain:
+            continue
+        if any(ign in domain for ign in IGNORED_SERP_DOMAINS):
+            continue
+        found.add(f"{parsed.scheme}://{domain}")
+    return sorted(found)
 
 
 def crawl_single_site(base_url: str, max_pages: int = 5) -> dict:
-    site_start_time = time.time()
+    started = time.time()
     base_url = base_url.rstrip('/')
     domain = urlparse(base_url).netloc
+    visited: set[str] = set()
+    queue = [base_url, f"{base_url}/contact", f"{base_url}/contact-us", f"{base_url}/about"]
+    emails: set[str] = set()
+    phones: set[str] = set()
 
-    visited_urls = set()
-    urls_to_visit = [
-        base_url,
-        f"{base_url}/contact",
-        f"{base_url}/contact-us",
-        f"{base_url}/about",
-    ]
-    found_emails = set()
-    found_phones = set()
+    def is_internal(url: str) -> bool:
+        p = urlparse(url)
+        return (not p.netloc or p.netloc == domain) and not p.path.lower().endswith(IMAGE_EXTENSIONS)
 
-    def is_internal_link(url: str) -> bool:
-        parsed = urlparse(url)
-        if parsed.netloc and parsed.netloc != domain:
-            return False
-        return not parsed.path.lower().endswith(IMAGE_EXTENSIONS)
+    sess = requests.Session()
+    sess.headers.update(HTTP_HEADERS)
 
-    session_req = requests.Session()
-    session_req.headers.update(HTTP_HEADERS)
-
-    while urls_to_visit and len(visited_urls) < max_pages:
-        current_url = urls_to_visit.pop(0)
-
-        if current_url.lower().startswith(NON_PAGE_SCHEMES) or current_url in visited_urls:
+    while queue and len(visited) < max_pages:
+        url = queue.pop(0)
+        if url.lower().startswith(NON_PAGE_SCHEMES) or url in visited:
             continue
-
-        visited_urls.add(current_url)
-
+        visited.add(url)
         try:
-            resp = session_req.get(current_url, timeout=8, verify=False)
+            resp = sess.get(url, timeout=8, verify=False)
             if resp.status_code != 200 or not resp.text:
                 continue
-
-            raw_html = resp.text
-
-            for match in re.findall(EMAIL_REGEX, raw_html, re.IGNORECASE):
-                cleaned_match = match.lower().rstrip('.')
-                if _valid_email(cleaned_match):
-                    found_emails.add(cleaned_match)
-
-            visible_text = BeautifulSoup(raw_html, 'html.parser').get_text(" ", strip=True)
-            for m in _extract_phones(visible_text):
-                found_phones.add(m)
-
-            soup = BeautifulSoup(raw_html, 'html.parser')
-            for anchor in soup.find_all('a', href=True):
-                href = anchor['href'].strip()
-
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            emails |= _extract_emails(resp.text)
+            phones |= _extract_phones(soup.get_text(" ", strip=True))
+            for a in soup.find_all('a', href=True):
+                href = a['href'].strip()
                 if href.lower().startswith("mailto:"):
-                    addr = href[7:].split("?")[0].strip()
+                    addr = href[7:].split("?")[0].strip().lower()
                     if _valid_email(addr):
-                        found_emails.add(addr.lower())
+                        emails.add(addr)
                     continue
-
-                if href.lower().startswith(("tel:", "javascript:", "#")):
+                if href.lower().startswith(NON_PAGE_SCHEMES):
                     continue
-
-                full_url = urljoin(current_url, href).split('#')[0].rstrip('/')
-                if full_url not in visited_urls and is_internal_link(full_url):
-                    if full_url not in urls_to_visit:
-                        urls_to_visit.append(full_url)
+                full = urljoin(url, href).split('#')[0].rstrip('/')
+                if full not in visited and full not in queue and is_internal(full):
+                    queue.append(full)
         except Exception:
             pass
 
-    site_execution_time = round(time.time() - site_start_time, 2)
-    sorted_emails = sorted(list(found_emails))
-
     return {
-        "domain": domain,
-        "target_url": base_url,
-        "execution_time_seconds": site_execution_time,
-        "emails_count": len(sorted_emails),
-        "emails": sorted_emails,
-        "contact_numbers": sorted(found_phones),
-        "website": base_url,
-        "pages_visited": sorted(list(visited_urls))
+        "domain": domain, "website": base_url, "target_url": base_url,
+        "execution_time_seconds": round(time.time() - started, 2),
+        "emails": sorted(emails), "emails_count": len(emails),
+        "contact_numbers": sorted(phones),
+        "pages_visited": sorted(visited),
     }
 
 
-def _build_output(query, results, total_execution_time, linkedin_profiles, linkedin_scanned):
-    site_emails = {e for site in results for e in site["emails"]}
-    linkedin_emails = {e for p in linkedin_profiles for e in p.get("emails", [])}
-    combined_unique_emails = sorted(site_emails | linkedin_emails)
-    all_numbers = sorted(
-        {n for p in linkedin_profiles for n in p.get("contact_numbers", [])}
-        | {n for site in results for n in site.get("contact_numbers", [])}
-    )
-    return {
+# ==============================================================================
+# SECTION: ORCHESTRATION & ROUTES
+# ==============================================================================
+
+def run_query_email_scraper(query: str, user_id: str, max_linkedin_results: int = 20,
+                            max_serp_results: int = 30, max_pages_per_site: int = 5,
+                            max_workers: int = 8, crawl_sites: bool = True):
+    start = time.time()
+
+    profiles, scanned = [], 0
+    target_urls: list[str] = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        li_future = pool.submit(fetch_linkedin_profiles, query, max_linkedin_results)
+        if crawl_sites:
+            try:
+                target_urls = fetch_serp_urls(query, max_serp_results)
+            except Exception as exc:
+                print(f"[X] Website discovery failed: {exc}")
+        profiles, scanned = li_future.result()
+
+    sites: list[dict] = []
+    if target_urls:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futs = {pool.submit(crawl_single_site, u, max_pages_per_site): u for u in target_urls}
+            for f in as_completed(futs):
+                try:
+                    sites.append(f.result())
+                except Exception as exc:
+                    print(f"[X] Error processing {futs[f]}: {exc}")
+    sites.sort(key=lambda x: x["domain"])
+
+    # LinkedIn contact totals stay LinkedIn-only; website data is reported separately.
+    emails = sorted({e for p in profiles for e in p["emails"]})
+    phones = sorted({n for p in profiles for n in p["contact_numbers"]})
+    elapsed = round(time.time() - start, 2)
+
+    output = {
         "query": query,
         "metrics": {
-            "total_domains_crawled": len(results),
-            "total_unique_emails_found": len(combined_unique_emails),
-            "total_linkedin_profiles_found": len(linkedin_profiles),
-            "total_linkedin_profiles_scanned": linkedin_scanned,
-            "total_execution_time_seconds": total_execution_time,
-            "total_execution_time_formatted": f"{int(total_execution_time // 60)}m {round(total_execution_time % 60, 2)}s",
+            "total_linkedin_profiles_found": len(profiles),
+            "total_linkedin_results_scanned": scanned,
+            "profiles_with_email": sum(1 for p in profiles if p["emails"]),
+            "profiles_with_phone": sum(1 for p in profiles if p["contact_numbers"]),
+            "total_unique_emails_found": len(emails),
+            "total_unique_phones_found": len(phones),
+            "total_domains_crawled": len(sites),
+            "total_execution_time_seconds": elapsed,
+            "total_execution_time_formatted": f"{int(elapsed // 60)}m {round(elapsed % 60, 2)}s",
         },
-        "all_emails": combined_unique_emails,
-        "all_contact_numbers": all_numbers,
-        "linkedin_profiles": linkedin_profiles,
-        "sites_data": results,
+        "all_emails": emails,
+        "all_contact_numbers": phones,
+        "linkedin_profiles": profiles,
+        "sites_data": sites,
     }
 
-
-def run_query_email_scraper(query: str, user_id: str, max_serp_results: int = 50, max_pages_per_site: int = 5,
-                            max_workers: int = 8, max_linkedin_results: int = 20):
-    total_start_time = time.time()
-
-    linkedin_profiles, linkedin_scanned = [], 0
-    with ThreadPoolExecutor(max_workers=2) as discovery_pool:
-        linkedin_future = discovery_pool.submit(fetch_linkedin_profiles, query, max_linkedin_results)
-        target_urls = fetch_serp_urls(query, max_results=max_serp_results)
-        try:
-            linkedin_profiles, linkedin_scanned = linkedin_future.result()
-        except Exception as exc:
-            print(f"[X] LinkedIn discovery failed: {exc}")
-
-    results = []
-    if target_urls:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_url = {executor.submit(crawl_single_site, url, max_pages_per_site): url for url in target_urls}
-            for future in as_completed(future_to_url):
-                url = future_to_url[future]
-                try:
-                    results.append(future.result())
-                except Exception as exc:
-                    print(f"[X] Error processing {url}: {exc}")
-
-    total_execution_time = round(time.time() - total_start_time, 2)
-    output = _build_output(query, results, total_execution_time, linkedin_profiles, linkedin_scanned)
-
     try:
-        storage = save_to_mongo(query, user_id, linkedin_profiles, results, output["metrics"])
+        storage = save_to_mongo(query, user_id, profiles, sites, output["metrics"])
         output["metrics"]["profiles_saved_to_mongodb"] = storage["linkedin_profiles_saved"]
         output["storage"] = storage
     except (PyMongoError, RuntimeError) as exc:
@@ -443,25 +659,24 @@ def api_scrape():
     payload = request.get_json(silent=True) or {}
     query = (payload.get("query") or "").strip()
     user_id = str(session['user_id'])
-
     if not query:
         return jsonify({"error": "A search query is required."}), 400
 
-    def clamp(value, default, lo, hi):
+    def clamp(v, default, lo, hi):
         try:
-            return max(lo, min(hi, int(value)))
+            return max(lo, min(hi, int(v)))
         except (TypeError, ValueError):
             return default
 
     try:
-        result = run_query_email_scraper(
+        return jsonify(run_query_email_scraper(
             query=query,
             user_id=user_id,
+            max_linkedin_results=clamp(payload.get("max_linkedin_results"), 20, 1, 50),
             max_serp_results=clamp(payload.get("max_results"), 30, 1, 100),
             max_pages_per_site=clamp(payload.get("max_pages_per_site"), 5, 1, 15),
             max_workers=clamp(payload.get("max_workers"), 8, 1, 16),
-            max_linkedin_results=clamp(payload.get("max_linkedin_results"), 20, 1, 50),
-        )
-        return jsonify(result)
+            crawl_sites=bool(payload.get("crawl_sites", True)),
+        ))
     except Exception as exc:
         return jsonify({"error": f"Scrape failed: {exc}"}), 500
