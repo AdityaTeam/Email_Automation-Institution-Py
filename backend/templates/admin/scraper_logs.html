@@ -10,7 +10,7 @@
         :root { --admin-primary: #343a40; --primary-color: #4a90d9; }
         body { background: #f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .sidebar { min-height: 100vh; background: #212529; color: white; }
-        .sidebar .nav-link { color: #rgba(255,255,255,0.75); padding: 12px 20px; border-radius: 8px; margin: 5px 10px; transition: all 0.3s; }
+        .sidebar .nav-link { color: rgba(255,255,255,0.75); padding: 12px 20px; border-radius: 8px; margin: 5px 10px; transition: all 0.3s; }
         .sidebar .nav-link:hover, .sidebar .nav-link.active { background: #343a40; color: white; }
         .sidebar .nav-link i { margin-right: 10px; }
         .main-content { padding: 30px; }
@@ -38,7 +38,12 @@
             <div class="col-md-10 main-content">
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2><i class="fas fa-database text-dark me-2"></i> Global Scraped Data Repository</h2>
-                    <span class="badge bg-dark px-3 py-2" id="totalRecordsBadge">0 Total Records</span>
+                    <div>
+                        <button class="btn btn-success fw-bold me-2" onclick="exportAdminDataToExcel()">
+                            <i class="fas fa-file-excel me-1"></i> Export Repository to Excel
+                        </button>
+                        <span class="badge bg-dark px-3 py-2" id="totalRecordsBadge">0 Total Records</span>
+                    </div>
                 </div>
 
                 <!-- Filter Controls Card -->
@@ -143,8 +148,7 @@
                     renderTable(data.profiles, (page - 1) * 20);
                     renderPagination(data.page, data.total_pages);
                     document.getElementById('totalRecordsBadge').textContent = `${data.total} Total Records`;
-                    
-                    // Populate User Dropdown
+
                     if (data.available_users) {
                         const userSelect = document.getElementById('filterUserId');
                         const currentVal = userSelect.value;
@@ -207,6 +211,15 @@
                 li.innerHTML = `<a class="page-link" href="#" onclick="loadScrapedData(${i}); return false;">${i}</a>`;
                 ul.appendChild(li);
             }
+        }
+
+        function exportAdminDataToExcel() {
+            const query = document.getElementById('filterQuery').value;
+            const userId = document.getElementById('filterUserId').value;
+            const hasPhone = document.getElementById('filterHasPhone').value;
+            const hasEmail = document.getElementById('filterHasEmail').value;
+
+            window.location.href = `/api/admin/export/excel?query=${encodeURIComponent(query)}&user_id=${encodeURIComponent(userId)}&has_phone=${hasPhone}&has_email=${hasEmail}`;
         }
     </script>
 </body>

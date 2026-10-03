@@ -170,7 +170,10 @@
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <span><i class="fas fa-at"></i> Emails Found on LinkedIn Profiles</span>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="copyAllEmails()"><i class="fas fa-copy me-1"></i> Copy All</button>
+                            <div>
+                                <button class="btn btn-sm btn-success me-2" onclick="exportToExcel()"><i class="fas fa-file-excel me-1"></i> Export Excel</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="copyAllEmails()"><i class="fas fa-copy me-1"></i> Copy All</button>
+                            </div>
                         </div>
                         <div class="card-body">
                             <div id="emailList" class="d-flex flex-wrap gap-2" style="max-height: 250px; overflow-y: auto;"></div>
@@ -179,7 +182,10 @@
 
                     <!-- LinkedIn Profiles Panel -->
                     <div class="card">
-                        <div class="card-header"><i class="fab fa-linkedin text-info"></i> Matching LinkedIn Profiles</div>
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="fab fa-linkedin text-info"></i> Matching LinkedIn Profiles</span>
+                            <button class="btn btn-sm btn-outline-success" onclick="exportToExcel()"><i class="fas fa-file-excel me-1"></i> Export Excel</button>
+                        </div>
                         <div class="card-body">
                             <div id="linkedinList" class="row g-3" style="max-height: 420px; overflow-y: auto;"></div>
                         </div>
@@ -414,6 +420,29 @@
             if (globalEmails.length === 0) return;
             navigator.clipboard.writeText(globalEmails.join('\n'));
             alert('Copied ' + globalEmails.length + ' emails to clipboard!');
+        }
+
+        async function exportToExcel() {
+            try {
+                const response = await fetch('/api/export/excel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ profiles: globalLinkedinProfiles })
+                });
+
+                if (!response.ok) throw new Error("Excel export failed.");
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'scraped_leads_export.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            } catch (err) {
+                alert('Export Error: ' + err.message);
+            }
         }
     </script>
 </body>

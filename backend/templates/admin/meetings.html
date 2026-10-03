@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Meetings - Admin Panel</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background: #f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .sidebar { min-height: 100vh; background: #1e293b; color: white; }
+        .sidebar .nav-link { color: #94a3b8; padding: 12px 20px; margin: 4px 10px; border-radius: 8px; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background: #3b82f6; color: white; }
+        .main-content { padding: 30px; }
+        .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); margin-bottom: 20px; }
+        .meeting-banner-preview { height: 160px; object-fit: cover; border-radius: 8px 8px 0 0; width: 100%; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Admin Sidebar -->
+            <div class="col-md-2 sidebar p-0">
+                <div class="p-3 border-bottom border-secondary">
+                    <i class="fas fa-shield-alt me-2 text-primary"></i><strong>Admin Panel</strong>
+                </div>
+                <nav class="nav flex-column mt-2">
+                    <a class="nav-link" href="/admin"><i class="fas fa-tachometer-alt me-2"></i> Dashboard</a>
+                    <a class="nav-link active" href="/admin/meetings"><i class="fas fa-video me-2"></i> Manage Meetings</a>
+                    <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt me-2"></i> Logout</a>
+                </nav>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="col-md-10 main-content">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="fas fa-video text-primary me-2"></i> Host & Schedule Google Meetings</h2>
+                    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createMeetingModal">
+                        <i class="fas fa-plus-circle me-2"></i> Create New Meeting
+                    </button>
+                </div>
+
+                <div id="alertContainer"></div>
+
+                <!-- Existing Meetings Grid -->
+                <div class="card">
+                    <div class="card-header bg-white fw-bold"><i class="fas fa-list me-2 text-primary"></i> Active Admin Hosted Meetings</div>
+                    <div class="card-body">
+                        <div id="meetingsGrid" class="row g-4">
+                            <div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Meeting Modal -->
+    <div class="modal fade" id="createMeetingModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-video text-primary me-2"></i> Host New Google Meeting</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="createMeetingForm">
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Meeting Title</label>
+                            <input type="text" id="mTitle" class="form-control" required placeholder="e.g. AI Internship Orientation Session">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Topic / Category</label>
+                            <input type="text" id="mTopic" class="form-control" required placeholder="e.g. Generative AI, Engineering, Onboarding">
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Banner Image URL</label>
+                                <input type="url" id="mBanner" class="form-control" placeholder="https://example.com/banner.jpg">
+                                <small class="text-muted">Leave blank for default tech banner</small>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Scheduled Time</label>
+                                <input type="text" id="mTime" class="form-control" placeholder="e.g. Today at 4:00 PM IST">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Description / Agenda</label>
+                            <textarea id="mDescription" class="form-control" rows="4" placeholder="Detail the agenda and guidelines for participants..."></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" id="saveMeetingBtn" class="btn btn-primary"><i class="fas fa-video me-1"></i> Generate & Host Meeting</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', loadMeetings);
+
+        async function loadMeetings() {
+            const grid = document.getElementById('meetingsGrid');
+            try {
+                const res = await fetch('/api/meetings');
+                const data = await res.json();
+
+                if (data.meetings && data.meetings.length > 0) {
+                    grid.innerHTML = data.meetings.map(m => `
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card h-100 border">
+                                <img src="${m.banner_url}" class="meeting-banner-preview" alt="Banner">
+                                <div class="card-body">
+                                    <span class="badge bg-primary mb-2">${m.topic}</span>
+                                    <h5 class="card-title fw-bold">${m.title}</h5>
+                                    <p class="small text-muted mb-2"><i class="fas fa-clock me-1"></i> ${m.scheduled_time}</p>
+                                    <p class="card-text small text-secondary">${m.description || 'No description provided.'}</p>
+                                    <div class="bg-light p-2 rounded small mb-3">
+                                        <strong>Link:</strong> <a href="${m.meeting_uri}" target="_blank">${m.meeting_uri}</a>
+                                    </div>
+                                    <button class="btn btn-sm btn-outline-danger w-100" onclick="deleteMeeting('${m._id}')">
+                                        <i class="fas fa-trash me-1"></i> Delete Meeting
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    grid.innerHTML = '<p class="text-center text-muted py-5">No meetings hosted yet. Click "Create New Meeting" to generate one.</p>';
+                }
+            } catch (err) {
+                grid.innerHTML = `<div class="alert alert-danger">Failed to load meetings: ${err.message}</div>`;
+            }
+        }
+
+        document.getElementById('createMeetingForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('saveMeetingBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Creating Space...';
+
+            try {
+                const res = await fetch('/api/admin/meetings/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: document.getElementById('mTitle').value,
+                        topic: document.getElementById('mTopic').value,
+                        banner_url: document.getElementById('mBanner').value,
+                        scheduled_time: document.getElementById('mTime').value,
+                        description: document.getElementById('mDescription').value
+                    })
+                });
+
+                const data = await res.json();
+                if (!res.ok || data.error) throw new Error(data.error || 'Failed to create meeting');
+
+                bootstrap.Modal.getInstance(document.getElementById('createMeetingModal')).hide();
+                document.getElementById('createMeetingForm').reset();
+                loadMeetings();
+            } catch (err) {
+                alert('Error: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-video me-1"></i> Generate & Host Meeting';
+            }
+        });
+
+        async function deleteMeeting(id) {
+            if (!confirm('Are you sure you want to delete this meeting?')) return;
+            try {
+                const res = await fetch(`/api/admin/meetings/${id}`, { method: 'DELETE' });
+                if (res.ok) loadMeetings();
+            } catch (err) { alert('Delete failed: ' + err.message); }
+        }
+    </script>
+</body>
+</html>

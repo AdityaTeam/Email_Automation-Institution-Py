@@ -4,15 +4,14 @@ LinkedIn Profile Scraper (keyword-accurate, LinkedIn-sourced contact info only)
 Pipeline:
   1. Query Google / Bing / Yahoo / DuckDuckGo restricted to site:linkedin.com/in
   2. Keep ONLY profiles whose headline / indexed bio actually contains the keyword
-     (word-boundary matching, ALL terms required, synonym aware: gen ai = generative ai = genai)
-  3. Reject "sales / marketing / lead-gen" profiles unless the keyword sits in their headline
-  4. Extract email / phone ONLY from the LinkedIn result itself (title + snippet of the
-     linkedin.com/in page). No third-party websites are crawled or merged.
+  3. Extract email / phone ONLY from the LinkedIn result itself
+  4. Provide Excel export API endpoints for User and Admin panels
 """
 
-from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, send_file
 import os
 import re
+import io
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,6 +20,7 @@ from urllib.parse import urlparse, urljoin, quote_plus, unquote
 
 import requests
 import urllib3
+import pandas as pd
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from dotenv import load_dotenv
 from pymongo import MongoClient, UpdateOne
@@ -53,11 +53,6 @@ HTTP_HEADERS = {
     "Connection": "keep-alive",
 }
 
-# ------------------------------------------------------------------------------
-# Relevance configuration
-# ------------------------------------------------------------------------------
-
-# Roles that are NOT wanted unless the searched keyword itself is in the headline.
 DISQUALIFY_KEYWORDS = (
     "lead generation", "lead gen", "market lead", "marketing", "sales",
     "real estate", "recruiter", "recruitment", "talent acquisition",
@@ -66,20 +61,13 @@ DISQUALIFY_KEYWORDS = (
 
 STOPWORDS = {"a", "an", "and", "at", "for", "in", "of", "or", "the", "to", "with", "on"}
 
-# Concept rules: (regex found in the user's query, regex used to match profiles).
-# Lets "gen ai" also match "Generative AI", "GenAI", "Gen-AI", etc.
 CONCEPT_RULES = [
-    (re.compile(r"\bgen(?:erative)?[\s\-]?ai\b", re.I),
-     r"gen(?:erative)?[\s\-]?ai"),
-    (re.compile(r"\b(?:ml|machine[\s\-]?learning)\b", re.I),
-     r"(?:ml|machine[\s\-]?learning)"),
-    (re.compile(r"\b(?:llms?|large[\s\-]language[\s\-]models?)\b", re.I),
-     r"(?:llms?|large[\s\-]language[\s\-]models?)"),
-    (re.compile(r"\b(?:nlp|natural[\s\-]language[\s\-]processing)\b", re.I),
-     r"(?:nlp|natural[\s\-]language[\s\-]processing)"),
+    (re.compile(r"\bgen(?:erative)?[\s\-]?ai\b", re.I), r"gen(?:erative)?[\s\-]?ai"),
+    (re.compile(r"\b(?:ml|machine[\s\-]?learning)\b", re.I), r"(?:ml|machine[\s\-]?learning)"),
+    (re.compile(r"\b(?:llms?|large[\s\-]language[\s\-]models?)\b", re.I), r"(?:llms?|large[\s\-]language[\s\-]models?)"),
+    (re.compile(r"\b(?:nlp|natural[\s\-]language[\s\-]processing)\b", re.I), r"(?:nlp|natural[\s\-]language[\s\-]processing)"),
 ]
 
-# Alternate spellings used to widen the SEARCH (matching is still strict afterwards).
 SEARCH_PHRASE_ALTERNATES = {
     "gen ai": ["generative ai", "genai"],
     "genai": ["generative ai", "gen ai"],
@@ -97,7 +85,7 @@ _mongo_client = None
 
 
 # ==============================================================================
-# SECTION: DATABASE
+# DATABASE
 # ==============================================================================
 
 def get_db():
@@ -154,12 +142,11 @@ def save_to_mongo(query: str, user_id: str, profiles: list[dict], sites: list[di
         "domains": [x["domain"] for x in sites],
         "created_at": now,
     })
-    return {"run_id": str(run.inserted_id), "linkedin_profiles_saved": len(profile_ops),
-            "sites_saved": len(site_ops)}
+    return {"run_id": str(run.inserted_id), "linkedin_profiles_saved": len(profile_ops), "sites_saved": len(site_ops)}
 
 
 # ==============================================================================
-# SECTION: SEARCH ENGINES
+# SEARCH ENGINES
 # ==============================================================================
 
 def _search_duckduckgo(query: str, max_results: int = 30) -> list[dict]:
@@ -169,8 +156,7 @@ def _search_duckduckgo(query: str, max_results: int = 30) -> list[dict]:
             for r in list(ddgs.text(query, max_results=max_results)):
                 href = r.get("href") or r.get("url") or ""
                 if href.startswith("http"):
-                    results.append({"url": href, "title": r.get("title", ""),
-                                    "snippet": r.get("body", ""), "engine": "DuckDuckGo"})
+                    results.append({"url": href, "title": r.get("title", ""), "snippet": r.get("body", ""), "engine": "DuckDuckGo"})
     except Exception as e:
         print(f"[!] DuckDuckGo Engine Warning: {e}")
     return results
@@ -183,8 +169,7 @@ def _search_google(query: str, max_results: int = 30) -> list[dict]:
             for hit in google_search(query, num_results=max_results, advanced=True):
                 href = getattr(hit, 'url', str(hit))
                 if href.startswith("http"):
-                    results.append({"url": href, "title": getattr(hit, 'title', '') or '',
-                                    "snippet": getattr(hit, 'description', '') or '', "engine": "Google"})
+                    results.append({"url": href, "title": getattr(hit, 'title', '') or '', "snippet": getattr(hit, 'description', '') or '', "engine": "Google"})
         else:
             url = f"https://www.google.com/search?q={quote_plus(query)}&num={max_results}"
             resp = requests.get(url, headers=HTTP_HEADERS, timeout=6)
@@ -195,8 +180,7 @@ def _search_google(query: str, max_results: int = 30) -> list[dict]:
                     title = g.select_one("h3")
                     snippet = g.select_one(".VwiC3b") or g.select_one(".st")
                     if link and link.get("href", "").startswith("http"):
-                        results.append({"url": link["href"], "title": title.text if title else "",
-                                        "snippet": snippet.text if snippet else "", "engine": "Google"})
+                        results.append({"url": link["href"], "title": title.text if title else "", "snippet": snippet.text if snippet else "", "engine": "Google"})
     except Exception as e:
         print(f"[!] Google Engine Warning: {e}")
     return results
@@ -216,8 +200,7 @@ def _search_bing(query: str, max_results: int = 30) -> list[dict]:
                 if title_elem and title_elem.get("href", "").startswith("http"):
                     href = title_elem["href"]
                     if "bing.com" not in href and "msn.com" not in href:
-                        results.append({"url": href, "title": title_elem.text,
-                                        "snippet": snippet_elem.text if snippet_elem else "", "engine": "Bing"})
+                        results.append({"url": href, "title": title_elem.text, "snippet": snippet_elem.text if snippet_elem else "", "engine": "Bing"})
     except Exception as e:
         print(f"[!] Bing Engine Error: {e}")
     return results
@@ -242,29 +225,24 @@ def _search_yahoo(query: str, max_results: int = 30) -> list[dict]:
                         if m:
                             raw_url = unquote(m.group(1))
                     if "yahoo.com" not in raw_url:
-                        results.append({"url": raw_url, "title": title_elem.text,
-                                        "snippet": snippet_elem.text if snippet_elem else "", "engine": "Yahoo"})
+                        results.append({"url": raw_url, "title": title_elem.text, "snippet": snippet_elem.text if snippet_elem else "", "engine": "Yahoo"})
     except Exception:
         pass
     return results
 
 
 # ==============================================================================
-# SECTION: KEYWORD MATCHING (the part that fixes irrelevant profiles)
+# KEYWORD MATCHING
 # ==============================================================================
 
 def _build_requirements(query: str) -> list[str]:
-    """
-    Turn the query into an ORDERED list of regex fragments (one per concept/word).
-    'gen ai engineer' -> ['gen(?:erative)?[\\s\\-]?ai', 'engineer\\w*']
-    """
     text = query.lower().replace('"', ' ')
     found: list[tuple[int, str]] = []
 
     for rule_re, profile_pattern in CONCEPT_RULES:
         for m in rule_re.finditer(text):
             found.append((m.start(), profile_pattern))
-            text = text[:m.start()] + " " * (m.end() - m.start()) + text[m.end():]  # mask span
+            text = text[:m.start()] + " " * (m.end() - m.start()) + text[m.end():]
 
     for m in re.finditer(r"[a-z0-9+#.]+", text):
         tok = m.group(0)
@@ -281,14 +259,10 @@ _B_L, _B_R = r"(?<![a-z0-9])", r"(?![a-z0-9])"
 
 
 def _all_match(text: str, frags: list[str]) -> bool:
-    """Every term present somewhere in text (whole-word)."""
-    return bool(frags) and bool(text) and all(
-        re.search(_B_L + f + _B_R, text, re.I) for f in frags
-    )
+    return bool(frags) and bool(text) and all(re.search(_B_L + f + _B_R, text, re.I) for f in frags)
 
 
 def _phrase_match(text: str, frags: list[str]) -> bool:
-    """Terms appear contiguously, in order (e.g. 'Gen AI Engineer', 'GenAI engineers')."""
     if not frags or not text:
         return False
     return re.search(_B_L + r"[\s\-]+".join(frags) + _B_R, text, re.I) is not None
@@ -299,13 +273,6 @@ def _contains_word(text: str, phrase: str) -> bool:
 
 
 def _relevance_score(headline: str, snippet: str, query: str) -> tuple[int, str]:
-    """
-    Returns (score, matched_in). score 0 = reject.
-      3 -> every query term is in the headline
-      2 -> the exact keyword phrase (synonym aware) is in the indexed bio
-    Terms scattered across a long bio (e.g. 'Software Engineer ... Skills: Generative AI')
-    are NOT enough, so unrelated profiles are dropped.
-    """
     frags = _build_requirements(query)
     headline = headline or ""
     snippet = snippet or ""
@@ -316,8 +283,6 @@ def _relevance_score(headline: str, snippet: str, query: str) -> tuple[int, str]
     if not (in_headline or in_bio):
         return 0, ""
 
-    # Reject marketing / sales / lead-gen profiles unless the keyword is in the headline
-    # or the user is explicitly searching for that kind of role.
     if not in_headline:
         for bad in DISQUALIFY_KEYWORDS:
             if _contains_word(headline, bad) and bad not in q_low:
@@ -327,7 +292,7 @@ def _relevance_score(headline: str, snippet: str, query: str) -> tuple[int, str]
 
 
 # ==============================================================================
-# SECTION: CONTACT EXTRACTION (from LinkedIn result text only)
+# CONTACT EXTRACTION
 # ==============================================================================
 
 EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}'
@@ -335,9 +300,9 @@ IGNORED_EMAIL_DOMAINS = ("linkedin.com", "licdn.com", "example.com", "sentry.io"
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.ico', '.pdf', '.css', '.js')
 
 PHONE_PATTERNS = [
-    re.compile(r"(?<![\w+])\+\d{1,3}[\s.-]?\(?\d{1,5}\)?(?:[\s.-]?\d{2,5}){2,4}(?!\d)"),   # +91 98765 43210
-    re.compile(r"(?<!\d)[6-9]\d{4}[\s.-]?\d{5}(?!\d)"),                                    # Indian mobile
-    re.compile(r"(?<!\d)\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}(?!\d)"),                         # 123-456-7890
+    re.compile(r"(?<![\w+])\+\d{1,3}[\s.-]?\(?\d{1,5}\)?(?:[\s.-]?\d{2,5}){2,4}(?!\d)"),
+    re.compile(r"(?<!\d)[6-9]\d{4}[\s.-]?\d{5}(?!\d)"),
+    re.compile(r"(?<!\d)\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}(?!\d)"),
 ]
 
 
@@ -376,7 +341,7 @@ def _valid_phone(raw: str) -> str | None:
 
 
 def _extract_phones(*texts: str) -> set[str]:
-    found: dict[str, str] = {}   # digits -> display form (dedupes formatting variants)
+    found: dict[str, str] = {}
     for text in texts:
         if not text:
             continue
@@ -397,7 +362,6 @@ def _clean_profile_name(raw_name: str) -> str:
 
 
 def _normalize_profile_url(href: str) -> str | None:
-    """in.linkedin.com/in/x?trk=.. -> https://www.linkedin.com/in/x (dedupes country subdomains)."""
     m = re.search(r"linkedin\.com/in/([^/?#\s]+)", href, re.I)
     if not m:
         return None
@@ -405,7 +369,7 @@ def _normalize_profile_url(href: str) -> str | None:
 
 
 # ==============================================================================
-# SECTION: LINKEDIN DISCOVERY
+# LINKEDIN DISCOVERY
 # ==============================================================================
 
 def _search_phrases(query: str) -> list[str]:
@@ -425,8 +389,7 @@ def _search_phrases(query: str) -> list[str]:
 def _run_engines(q: str, max_results: int) -> list[dict]:
     items = []
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [pool.submit(fn, q, max_results)
-                   for fn in (_search_duckduckgo, _search_google, _search_bing, _search_yahoo)]
+        futures = [pool.submit(fn, q, max_results) for fn in (_search_duckduckgo, _search_google, _search_bing, _search_yahoo)]
         for f in as_completed(futures):
             try:
                 items.extend(f.result())
@@ -440,7 +403,6 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dic
     primary = phrases[0]
 
     variants = [f'site:linkedin.com/in "{p}"' for p in phrases]
-    # Extra queries nudging results that mention contact details in the profile text
     variants.append(f'site:linkedin.com/in "{primary}" "email" OR "gmail.com" OR "@"')
     variants.append(f'site:linkedin.com/in "{primary}" "phone" OR "mobile" OR "+91"')
 
@@ -476,7 +438,6 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dic
                     "engine": item.get("engine", "Search Engine"),
                 }
             else:
-                # Same profile seen again -> merge (a different snippet may expose an email/phone)
                 entry["_texts"].update({raw_title, snippet})
                 if len(snippet) > len(entry["snippet"]):
                     entry["snippet"] = snippet
@@ -508,11 +469,10 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dic
 
 
 # ==============================================================================
-# SECTION: WEBSITE DISCOVERY & CRAWLING (shown separately from LinkedIn data)
+# WEBSITE DISCOVERY & CRAWLING
 # ==============================================================================
 
 def fetch_serp_urls(query: str, max_results: int = 30) -> list[str]:
-    """Base URLs of the websites ranking for the query (LinkedIn/social/search domains excluded)."""
     found = set()
     for item in _run_engines(query, max_results):
         href = item.get("url", "")
@@ -579,7 +539,34 @@ def crawl_single_site(base_url: str, max_pages: int = 5) -> dict:
 
 
 # ==============================================================================
-# SECTION: ORCHESTRATION & ROUTES
+# EXPORT HELPERS
+# ==============================================================================
+
+def _format_profiles_for_excel(profiles: list[dict]) -> pd.DataFrame:
+    rows = []
+    for p in profiles:
+        emails = ", ".join(p.get("emails", [])) if isinstance(p.get("emails"), list) else (p.get("emails") or "")
+        phones = ", ".join(p.get("contact_numbers", [])) if isinstance(p.get("contact_numbers"), list) else (p.get("contact_number") or "")
+
+        rows.append({
+            "Email": emails if emails else "N/A",
+            "Name": p.get("name", "N/A"),
+            "Company": p.get("company", "LinkedIn Profile"),
+            "Designation": p.get("headline", p.get("designation", "N/A")),
+            "Phone": phones if phones else "N/A",
+            "LinkedIn": p.get("profile_url", p.get("linkedin", "N/A")),
+            "Industry": p.get("industry", "Technology"),
+            "Location": p.get("location", "N/A"),
+            "Source": p.get("engine", p.get("discovered_via", "Signal Scraper"))
+        })
+
+    return pd.DataFrame(rows, columns=[
+        "Email", "Name", "Company", "Designation", "Phone", "LinkedIn", "Industry", "Location", "Source"
+    ])
+
+
+# ==============================================================================
+# ORCHESTRATION & ROUTES
 # ==============================================================================
 
 def run_query_email_scraper(query: str, user_id: str, max_linkedin_results: int = 20,
@@ -609,7 +596,6 @@ def run_query_email_scraper(query: str, user_id: str, max_linkedin_results: int 
                     print(f"[X] Error processing {futs[f]}: {exc}")
     sites.sort(key=lambda x: x["domain"])
 
-    # LinkedIn contact totals stay LinkedIn-only; website data is reported separately.
     emails = sorted({e for p in profiles for e in p["emails"]})
     phones = sorted({n for p in profiles for n in p["contact_numbers"]})
     elapsed = round(time.time() - start, 2)
@@ -680,3 +666,76 @@ def api_scrape():
         ))
     except Exception as exc:
         return jsonify({"error": f"Scrape failed: {exc}"}), 500
+
+
+@scraper_bp.route('/api/export/excel', methods=['POST'])
+def export_user_scraped_excel():
+    if 'user_id' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    profiles = payload.get("profiles", [])
+
+    if not profiles:
+        db = get_db()
+        profiles = list(db.linkedin_profiles.find({"scraped_by_user_id": str(session['user_id'])}).sort("last_scraped_at", -1).limit(500))
+
+    df = _format_profiles_for_excel(profiles)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Leads')
+    output.seek(0)
+
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name='scraped_leads_export.xlsx'
+    )
+
+
+@scraper_bp.route('/api/admin/export/excel', methods=['GET', 'POST'])
+def export_admin_global_scraped_excel():
+    if session.get('role') != 'admin' and not session.get('is_admin'):
+        return jsonify({"error": "Admin unauthorized"}), 403
+
+    db = get_db()
+    query_filter = {}
+
+    search_term = request.args.get('search', '').strip() or request.args.get('query', '').strip()
+    user_filter = request.args.get('user_id', '').strip()
+    has_phone = request.args.get('has_phone', '').strip()
+    has_email = request.args.get('has_email', '').strip()
+
+    if search_term:
+        query_filter["$or"] = [
+            {"name": {"$regex": search_term, "$options": "i"}},
+            {"headline": {"$regex": search_term, "$options": "i"}},
+            {"last_query": {"$regex": search_term, "$options": "i"}}
+        ]
+    if user_filter and user_filter != "all":
+        query_filter["scraped_by_user_id"] = user_filter
+    if has_phone == 'true':
+        query_filter["contact_numbers.0"] = {"$exists": True}
+    elif has_phone == 'false':
+        query_filter["contact_numbers"] = {"$size": 0}
+    if has_email == 'true':
+        query_filter["emails.0"] = {"$exists": True}
+    elif has_email == 'false':
+        query_filter["emails"] = {"$size": 0}
+
+    profiles = list(db.linkedin_profiles.find(query_filter).sort("last_scraped_at", -1))
+    df = _format_profiles_for_excel(profiles)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Global Leads Repository')
+    output.seek(0)
+
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name='global_scraped_leads_repository.xlsx'
+    )

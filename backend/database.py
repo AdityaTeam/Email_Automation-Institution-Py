@@ -57,6 +57,11 @@ class MongoDB:
             print("🔌 MongoDB connection closed")
 
 
+# Standalone top-level wrapper for direct imports (e.g. from database import get_db)
+def get_db():
+    return MongoDB.get_db()
+
+
 # Database Collections
 class Collections:
     """Collection names"""
@@ -66,8 +71,8 @@ class Collections:
     REQUIREMENTS = 'requirements'
     TEMPLATES = 'templates'
     EMAIL_LOGS = 'email_logs'
-    CC_EMAILS = 'cc_emails' # FEATURE 3
-    CC_EMAILS = 'cc_emails'  # FEATURE 3: Global CC emails collection
+    CC_EMAILS = 'cc_emails'  # Global CC emails collection
+    GOOGLE_MEETINGS = 'google_meetings'
 
 
 # Initialize database with default data

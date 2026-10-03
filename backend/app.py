@@ -11,7 +11,7 @@ from backend.routes.user import user_bp
 from backend.routes.admin import admin_bp
 from backend.routes.updates import updates_bp
 from backend.routes.scraper import scraper_bp
-
+from backend.routes.meeting import meeting_bp
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', '3c935dc77ecc7312ef3414aaf939f276')
 
@@ -27,7 +27,7 @@ app.register_blueprint(user_bp)
 app.register_blueprint(admin_bp)
 app.register_blueprint(updates_bp)
 app.register_blueprint(scraper_bp)
-
+app.register_blueprint(meeting_bp)
 
 @app.route('/')
 def index():
