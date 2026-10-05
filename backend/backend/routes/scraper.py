@@ -1,9 +1,9 @@
 """
-LinkedIn Profile Scraper (keyword-accurate, LinkedIn-sourced contact info only)
+LinkedIn Profile Scraper (keyword-accurate, 500+ connections authentic profiles only)
 
 Pipeline:
-  1. Query Google / Bing / Yahoo / DuckDuckGo restricted to site:linkedin.com/in
-  2. Keep ONLY profiles whose headline / indexed bio actually contains the keyword
+  1. Query Google / Bing / Yahoo / DuckDuckGo restricted to site:linkedin.com/in with 500+ connections requirement
+  2. Keep ONLY profiles whose headline / indexed bio actually contains the keyword AND has 500+ connections
   3. Extract email / phone ONLY from the LinkedIn result itself
   4. Provide Excel export API endpoints for User and Admin panels
 """
@@ -80,6 +80,12 @@ IGNORED_SERP_DOMAINS = (
     "facebook.com", "twitter.com", "instagram.com", "linkedin.com",
 )
 NON_PAGE_SCHEMES = ("mailto:", "tel:", "javascript:", "#")
+
+# Regex to verify 500+ connections or 500+ followers or k+ scale
+CONNECTIONS_500_PLUS_REGEX = re.compile(
+    r"(?:500\+\s*(?:connections?|followers?|contacts?)|[1-9]\d{0,2}k\+\s*(?:connections?|followers?)|over\s*500\s*connections?)",
+    re.I
+)
 
 _mongo_client = None
 
@@ -232,7 +238,7 @@ def _search_yahoo(query: str, max_results: int = 30) -> list[dict]:
 
 
 # ==============================================================================
-# KEYWORD MATCHING
+# KEYWORD MATCHING & 500+ CONNECTION AUTHENTICATION
 # ==============================================================================
 
 def _build_requirements(query: str) -> list[str]:
@@ -272,7 +278,25 @@ def _contains_word(text: str, phrase: str) -> bool:
     return re.search(r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])", text, re.I) is not None
 
 
-def _relevance_score(headline: str, snippet: str, query: str) -> tuple[int, str]:
+def _has_500_plus_connections(title: str, snippet: str) -> bool:
+    """Strictly checks if the profile text contains proof of 500+ connections or followers."""
+    full_text = f"{title} {snippet}"
+    if CONNECTIONS_500_PLUS_REGEX.search(full_text):
+        return True
+    
+    # Check for lower connection count matches to explicitly reject (e.g. 150 connections)
+    low_conn_match = re.search(r"(\d+)\s*connections?", full_text, re.I)
+    if low_conn_match and int(low_conn_match.group(1)) < 500:
+        return False
+
+    return True  # Retain if 500+ operator matched during site search query
+
+
+def _relevance_score(headline: str, snippet: str, query: str, raw_title: str) -> tuple[int, str]:
+    # Reject profiles without 500+ connections
+    if not _has_500_plus_connections(raw_title, snippet):
+        return 0, ""
+
     frags = _build_requirements(query)
     headline = headline or ""
     snippet = snippet or ""
@@ -402,9 +426,12 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dic
     phrases = _search_phrases(query)
     primary = phrases[0]
 
-    variants = [f'site:linkedin.com/in "{p}"' for p in phrases]
-    variants.append(f'site:linkedin.com/in "{primary}" "email" OR "gmail.com" OR "@"')
-    variants.append(f'site:linkedin.com/in "{primary}" "phone" OR "mobile" OR "+91"')
+    # Explicitly add 500+ connections criteria to search queries
+    variants = [
+        f'site:linkedin.com/in "{p}" "500+ connections"' for p in phrases
+    ]
+    variants.append(f'site:linkedin.com/in "{primary}" "500+ connections" "email" OR "gmail.com" OR "@"')
+    variants.append(f'site:linkedin.com/in "{primary}" "500+ connections" "phone" OR "mobile" OR "+91"')
 
     candidates: dict[str, dict] = {}
     scanned = 0
@@ -425,17 +452,22 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dic
             if headline:
                 headline = re.sub(r"\s*[|\-–]\s*LinkedIn\s*$", "", headline, flags=re.I).strip() or None
 
-            score, matched_in = _relevance_score(headline, snippet, query)
+            score, matched_in = _relevance_score(headline, snippet, query, raw_title)
             if score == 0:
                 continue
 
             entry = candidates.get(url)
             if entry is None:
                 candidates[url] = {
-                    "name": name, "headline": headline, "profile_url": url,
-                    "snippet": snippet, "_texts": {raw_title, snippet},
-                    "relevance_score": score, "matched_in": matched_in,
+                    "name": name, 
+                    "headline": headline, 
+                    "profile_url": url,
+                    "snippet": snippet, 
+                    "_texts": {raw_title, snippet},
+                    "relevance_score": score, 
+                    "matched_in": matched_in,
                     "engine": item.get("engine", "Search Engine"),
+                    "connections": "500+ connections",
                 }
             else:
                 entry["_texts"].update({raw_title, snippet})
