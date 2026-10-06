@@ -12,6 +12,7 @@ from flask import Blueprint, render_template, request, jsonify, session, redirec
 import os
 import re
 import io
+import base64
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -177,36 +178,61 @@ def _search_google(query: str, max_results: int = 30) -> list[dict]:
                 if href.startswith("http"):
                     results.append({"url": href, "title": getattr(hit, 'title', '') or '', "snippet": getattr(hit, 'description', '') or '', "engine": "Google"})
         else:
-            url = f"https://www.google.com/search?q={quote_plus(query)}&num={max_results}"
-            resp = requests.get(url, headers=HTTP_HEADERS, timeout=6)
-            if resp.status_code == 200:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                for g in soup.select("div.g"):
-                    link = g.select_one("a[href]")
-                    title = g.select_one("h3")
-                    snippet = g.select_one(".VwiC3b") or g.select_one(".st")
-                    if link and link.get("href", "").startswith("http"):
-                        results.append({"url": link["href"], "title": title.text if title else "", "snippet": snippet.text if snippet else "", "engine": "Google"})
+            print("[!] Google: 'googlesearch-python' not installed; raw HTML fallback rarely works (pip install googlesearch-python)")
+            url = f"https://www.google.com/search?q={quote_plus(query)}&num={max_results}&hl=en"
+            resp = requests.get(url, headers=HTTP_HEADERS, timeout=8)
+            if resp.status_code != 200 or "/sorry/" in resp.url or "unusual traffic" in resp.text:
+                print(f"[!] Google blocked the request (HTTP {resp.status_code}, captcha/consent page)")
+                return results
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for g in soup.select("div.g"):
+                link = g.select_one("a[href]")
+                title = g.select_one("h3")
+                snippet = g.select_one(".VwiC3b") or g.select_one(".st")
+                if link and link.get("href", "").startswith("http"):
+                    results.append({"url": link["href"], "title": title.text if title else "", "snippet": snippet.text if snippet else "", "engine": "Google"})
     except Exception as e:
-        print(f"[!] Google Engine Warning: {e}")
+        print(f"[!] Google Engine Warning (likely rate-limited/blocked): {e}")
     return results
 
 
+def _unwrap_bing_url(href: str) -> str:
+    """Bing wraps result links as bing.com/ck/a?...&u=a1<base64-url>. Decode back to the real URL."""
+    if "bing.com/ck/a" not in href:
+        return href
+    m = re.search(r"[?&]u=([^&]+)", href)
+    if not m:
+        return ""
+    token = unquote(m.group(1))
+    if token.startswith("a1"):
+        token = token[2:]
+    token += "=" * (-len(token) % 4)
+    try:
+        return base64.urlsafe_b64decode(token).decode("utf-8", "ignore")
+    except Exception:
+        return ""
+
+
 def _search_bing(query: str, max_results: int = 30) -> list[dict]:
+    """Bing is also what Microsoft Edge uses, so this covers 'Edge' results."""
     results = []
     headers = {**HTTP_HEADERS, "Referer": "https://www.bing.com/"}
     try:
-        url = f"https://www.bing.com/search?q={quote_plus(query)}&count={max_results}"
-        resp = requests.get(url, headers=headers, timeout=8)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "html.parser")
-            for item in soup.select("li.b_algo"):
-                title_elem = item.select_one("h2 a")
-                snippet_elem = item.select_one(".b_caption p") or item.select_one("p")
-                if title_elem and title_elem.get("href", "").startswith("http"):
-                    href = title_elem["href"]
-                    if "bing.com" not in href and "msn.com" not in href:
-                        results.append({"url": href, "title": title_elem.text, "snippet": snippet_elem.text if snippet_elem else "", "engine": "Bing"})
+        url = f"https://www.bing.com/search?q={quote_plus(query)}&count={min(max_results, 50)}&setmkt=en-IN&setlang=en"
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            print(f"[!] Bing HTTP {resp.status_code}")
+            return results
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for item in soup.select("li.b_algo"):
+            title_elem = item.select_one("h2 a")
+            snippet_elem = item.select_one(".b_caption p") or item.select_one("p")
+            if not title_elem:
+                continue
+            href = _unwrap_bing_url(title_elem.get("href", ""))
+            host = urlparse(href).netloc.lower()
+            if href.startswith("http") and "bing.com" not in host and "msn.com" not in host:
+                results.append({"url": href, "title": title_elem.get_text(" ", strip=True), "snippet": snippet_elem.get_text(" ", strip=True) if snippet_elem else "", "engine": "Bing"})
     except Exception as e:
         print(f"[!] Bing Engine Error: {e}")
     return results
@@ -217,23 +243,29 @@ def _search_yahoo(query: str, max_results: int = 30) -> list[dict]:
     sess = requests.Session()
     sess.headers.update(HTTP_HEADERS)
     try:
-        url = f"https://search.yahoo.com/search?p={quote_plus(query)}&n={max_results}"
-        resp = sess.get(url, timeout=8)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "html.parser")
-            for item in soup.select("div.algo"):
-                title_elem = item.select_one("h3.title a")
-                snippet_elem = item.select_one("div.compText") or item.select_one("p")
-                if title_elem and title_elem.get("href", "").startswith("http"):
-                    raw_url = title_elem["href"]
-                    if "/RU=" in raw_url:
-                        m = re.search(r'/RU=([^/]+)/', raw_url)
-                        if m:
-                            raw_url = unquote(m.group(1))
-                    if "yahoo.com" not in raw_url:
-                        results.append({"url": raw_url, "title": title_elem.text, "snippet": snippet_elem.text if snippet_elem else "", "engine": "Yahoo"})
-    except Exception:
-        pass
+        url = f"https://search.yahoo.com/search?p={quote_plus(query)}&n={max_results}&ei=UTF-8"
+        resp = sess.get(url, timeout=10)
+        if resp.status_code != 200:
+            print(f"[!] Yahoo HTTP {resp.status_code}")
+            return results
+        if "consent" in resp.url:
+            print("[!] Yahoo returned a consent page")
+            return results
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for item in soup.select("div.algo, div.algo-sr"):
+            title_elem = item.select_one("h3.title a") or item.select_one("h3 a") or item.select_one("a[href]")
+            snippet_elem = item.select_one("div.compText") or item.select_one("p")
+            if not title_elem or not title_elem.get("href", "").startswith("http"):
+                continue
+            raw_url = title_elem["href"]
+            if "/RU=" in raw_url:
+                m = re.search(r'/RU=([^/]+)/', raw_url)
+                if m:
+                    raw_url = unquote(m.group(1))
+            if "yahoo.com" not in urlparse(raw_url).netloc:
+                results.append({"url": raw_url, "title": title_elem.get_text(" ", strip=True), "snippet": snippet_elem.get_text(" ", strip=True) if snippet_elem else "", "engine": "Yahoo"})
+    except Exception as e:
+        print(f"[!] Yahoo Engine Error: {e}")
     return results
 
 
@@ -412,13 +444,25 @@ def _search_phrases(query: str) -> list[str]:
 
 def _run_engines(q: str, max_results: int) -> list[dict]:
     items = []
+    engines = {
+        "DuckDuckGo": _search_duckduckgo,
+        "Google": _search_google,
+        "Bing": _search_bing,
+        "Yahoo": _search_yahoo,
+    }
+    counts = {}
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [pool.submit(fn, q, max_results) for fn in (_search_duckduckgo, _search_google, _search_bing, _search_yahoo)]
+        futures = {pool.submit(fn, q, max_results): name for name, fn in engines.items()}
         for f in as_completed(futures):
+            name = futures[f]
             try:
-                items.extend(f.result())
-            except Exception:
-                pass
+                res = f.result()
+            except Exception as e:
+                print(f"[!] {name} crashed: {e}")
+                res = []
+            counts[name] = len(res)
+            items.extend(res)
+    print(f"[engines] {q[:70]!r} -> {counts}")
     return items
 
 
@@ -432,6 +476,9 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dic
     ]
     variants.append(f'site:linkedin.com/in "{primary}" "500+ connections" "email" OR "gmail.com" OR "@"')
     variants.append(f'site:linkedin.com/in "{primary}" "500+ connections" "phone" OR "mobile" OR "+91"')
+    # People who put their email in their headline / About section
+    variants.append(f'site:linkedin.com/in "{primary}" "500+ connections" ("@gmail.com" OR "@outlook.com" OR "@yahoo.com" OR "@hotmail.com")')
+    variants.append(f'site:linkedin.com/in "{primary}" "500+ connections" ("email me" OR "reach me at" OR "contact me at" OR "e-mail")')
 
     candidates: dict[str, dict] = {}
     scanned = 0
@@ -477,7 +524,7 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dic
                     entry["headline"] = headline
                 if score > entry["relevance_score"]:
                     entry["relevance_score"], entry["matched_in"] = score, matched_in
-        time.sleep(0.2)
+        time.sleep(0.6)
 
     profiles = []
     for c in candidates.values():
