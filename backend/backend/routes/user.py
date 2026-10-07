@@ -4,7 +4,7 @@ Handles user dashboard, email management, CSV/Excel parsing, verification, and e
 """
 
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
-from models import EmailID, ExcelFile, Template, Requirement, EmailLog
+from models import EmailID, ExcelFile, Template, Requirement, Department, EmailLog
 from database import MongoDB, Collections
 from bson import ObjectId
 import os
@@ -356,12 +356,19 @@ def compose():
     email_ids = EmailID.get_by_user(user_id)
     excel_files = ExcelFile.get_by_user(user_id)
     requirements = Requirement.get_all()
+    departments = Department.get_all()
+    for requirement in requirements:
+        requirement['_id'] = str(requirement['_id'])
+        requirement['department_id'] = str(requirement['department_id']) if requirement.get('department_id') else ''
+    for department in departments:
+        department['_id'] = str(department['_id'])
     
     return render_template('user/compose.html',
                            username=session['username'],
                            email_ids=email_ids,
                            excel_files=excel_files,
-                           requirements=requirements)
+                           requirements=requirements,
+                           departments=departments)
 
 
 @user_bp.route('/api/templates', methods=['GET'])
@@ -383,9 +390,10 @@ def get_templates():
 @require_login
 def get_requirements():
     """Get requirements"""
-    requirements = Requirement.get_all()
+    requirements = Requirement.get_all(request.args.get('department_id'))
     for r in requirements:
         r['_id'] = str(r['_id'])
+        r['department_id'] = str(r['department_id']) if r.get('department_id') else ''
     return jsonify({'requirements': requirements})
 
 

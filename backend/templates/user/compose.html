@@ -67,11 +67,23 @@
                                 <div class="row">
                                     <div class="col-md-4">
                                         <div class="mb-3">
+                                            <label class="form-label">Department</label>
+                                            <select class="form-select" id="departmentSelect">
+                                                <option value="">-- Select Department --</option>
+                                                {% for department in departments %}
+                                                <option value="{{ department._id }}">{{ department.name }}</option>
+                                                {% endfor %}
+                                                <option value="unassigned">Unassigned</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
                                             <label class="form-label">Requirement</label>
-                                            <select class="form-select" id="requirementSelect">
+                                            <select class="form-select" id="requirementSelect" disabled>
                                                 <option value="">-- Select Requirement --</option>
                                                 {% for req in requirements %}
-                                                <option value="{{ req._id }}">{{ req.name }}</option>
+                                                <option value="{{ req._id }}" data-department-id="{{ req.department_id or 'unassigned' }}">{{ req.name }}</option>
                                                 {% endfor %}
                                             </select>
                                         </div>
@@ -348,7 +360,35 @@ ${companyWebsite}`;
             }
         });
         
-        document.getElementById('requirementSelect').addEventListener('change', async function() {
+        const requirementSelect = document.getElementById('requirementSelect');
+        const departmentSelect = document.getElementById('departmentSelect');
+        const requirementOptions = Array.from(requirementSelect.options)
+            .filter(option => option.value)
+            .map(option => ({
+                value: option.value,
+                name: option.textContent,
+                departmentId: option.dataset.departmentId
+            }));
+
+        departmentSelect.addEventListener('change', function() {
+            const departmentId = this.value;
+            requirementSelect.innerHTML = '<option value="">-- Select Requirement --</option>';
+            requirementSelect.disabled = !departmentId;
+
+            requirementOptions
+                .filter(option => option.departmentId === departmentId)
+                .forEach(optionData => {
+                    const option = document.createElement('option');
+                    option.value = optionData.value;
+                    option.textContent = optionData.name;
+                    option.dataset.departmentId = optionData.departmentId;
+                    requirementSelect.appendChild(option);
+                });
+
+            document.getElementById('templateSelect').innerHTML = '<option value="">-- Select Template --</option>';
+        });
+
+        requirementSelect.addEventListener('change', async function() {
             const requirementId = this.value;
             const templateSelect = document.getElementById('templateSelect');
             templateSelect.innerHTML = '<option value="">-- Select Template --</option>';

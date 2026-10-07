@@ -69,6 +69,7 @@ class Collections:
     EMAIL_IDS = 'email_ids'
     EXCEL_FILES = 'excel_files'
     REQUIREMENTS = 'requirements'
+    DEPARTMENTS = 'departments'
     TEMPLATES = 'templates'
     EMAIL_LOGS = 'email_logs'
     CC_EMAILS = 'cc_emails'  # Global CC emails collection

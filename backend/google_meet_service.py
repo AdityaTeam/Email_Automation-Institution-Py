@@ -4,8 +4,6 @@ Handles domain-wide delegated space creation using Google Service Account creden
 """
 
 import os
-from google.apps import meet_v2
-from google.oauth2 import service_account
 
 # Scope required for direct meeting space creation
 SCOPES = ['https://www.googleapis.com/auth/meetings.space.created']
@@ -18,6 +16,18 @@ def create_google_meet_space(impersonated_admin_email: str) -> dict:
     :param impersonated_admin_email: Workspace host email (e.g., admin@yourdomain.com)
     :return: dict containing meetingUri, space name, and meetingCode
     """
+    try:
+        from google.apps import meet_v2
+        from google.oauth2 import service_account
+    except ImportError:
+        return {
+            "success": False,
+            "error": (
+                "Google Meet dependencies are not installed. "
+                "Install google-apps-meet and google-auth to enable meeting creation."
+            )
+        }
+
     # Path to service account JSON key file from .env or default location
     credentials_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "credentials.json")
 

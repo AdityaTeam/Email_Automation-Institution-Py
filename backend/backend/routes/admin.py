@@ -4,7 +4,7 @@ Handles admin dashboard, user management, system control, and global scraper mon
 """
 
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
-from models import User, EmailID, ExcelFile, Template, Requirement, EmailLog
+from models import User, EmailID, ExcelFile, Template, Requirement, Department, EmailLog
 from database import MongoDB, Collections
 from bson import ObjectId
 import os
@@ -207,6 +207,7 @@ def reset_email_password(email_id):
 @require_admin
 def templates():
     requirements = Requirement.get_all()
+    departments = Department.get_all()
     templates_list = Template.get_all()
     
     for r in requirements:
@@ -217,16 +218,81 @@ def templates():
         t['requirement_id'] = str(t['requirement_id'])
     
     req_map = {str(r['_id']): r['name'] for r in requirements}
-    
+    department_map = {str(d['_id']): d['name'] for d in departments}
+
+    for r in requirements:
+        r['department_id'] = str(r['department_id']) if r.get('department_id') else ''
+        r['department_name'] = department_map.get(r['department_id'], 'Unassigned')
     for t in templates_list:
         t['requirement_name'] = req_map.get(str(t.get('requirement_id')), 'Unknown')
+        requirement = next((r for r in requirements if str(r['_id']) == str(t.get('requirement_id'))), None)
+        t['department_name'] = requirement.get('department_name', 'Unassigned') if requirement else 'Unassigned'
     
     return render_template(
         'admin/templates.html',
         username=session['username'],
         requirements=requirements,
+        departments=departments,
         templates=templates_list
     )
+
+
+@admin_bp.route('/admin/departments')
+@require_admin
+def departments():
+    departments_list = Department.get_all()
+    requirements = Requirement.get_all()
+    for department in departments_list:
+        department['_id'] = str(department['_id'])
+    for requirement in requirements:
+        requirement['_id'] = str(requirement['_id'])
+        requirement['department_id'] = str(requirement['department_id']) if requirement.get('department_id') else ''
+    return render_template(
+        'admin/departments.html',
+        username=session['username'],
+        departments=departments_list,
+        requirements=requirements
+    )
+
+
+@admin_bp.route('/api/admin/departments', methods=['GET'])
+@require_admin
+def get_departments():
+    departments_list = Department.get_all()
+    for department in departments_list:
+        department['_id'] = str(department['_id'])
+    return jsonify({'departments': departments_list})
+
+
+@admin_bp.route('/api/admin/departments', methods=['POST'])
+@require_admin
+def add_department():
+    name = request.json.get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    department = Department.create(name)
+    if department:
+        return jsonify({'success': True, 'department_id': str(department['_id'])})
+    return jsonify({'error': 'Failed to create department'}), 400
+
+
+@admin_bp.route('/api/admin/departments/<department_id>', methods=['PUT'])
+@require_admin
+def update_department(department_id):
+    name = request.json.get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    if Department.update(department_id, name):
+        return jsonify({'success': True})
+    return jsonify({'error': 'Department not found'}), 404
+
+
+@admin_bp.route('/api/admin/departments/<department_id>', methods=['DELETE'])
+@require_admin
+def delete_department(department_id):
+    if Department.delete(department_id):
+        return jsonify({'success': True})
+    return jsonify({'error': 'Department not found'}), 404
 
 
 @admin_bp.route('/api/admin/requirements', methods=['GET'])
@@ -236,6 +302,7 @@ def get_requirements():
     requirements = Requirement.get_all()
     for r in requirements:
         r['_id'] = str(r['_id'])
+        r['department_id'] = str(r['department_id']) if r.get('department_id') else ''
     return jsonify({'requirements': requirements})
 
 
@@ -245,11 +312,12 @@ def add_requirement():
     """Add a new requirement"""
     data = request.json
     name = data.get('name', '').strip()
+    department_id = data.get('department_id')
     
     if not name:
         return jsonify({'error': 'Name is required'}), 400
     
-    req = Requirement.create(name)
+    req = Requirement.create(name, department_id)
     if req:
         return jsonify({'success': True, 'requirement_id': str(req['_id'])})
     return jsonify({'error': 'Failed to create requirement'}), 400
@@ -261,11 +329,12 @@ def update_requirement(req_id):
     """Update a requirement"""
     data = request.json
     name = data.get('name', '').strip()
+    department_id = data.get('department_id')
     
     if not name:
         return jsonify({'error': 'Name is required'}), 400
     
-    if Requirement.update(req_id, name):
+    if Requirement.update(req_id, name, department_id):
         return jsonify({'success': True})
     return jsonify({'error': 'Failed to update requirement'}), 400
 

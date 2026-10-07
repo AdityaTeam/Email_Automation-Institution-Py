@@ -12,3 +12,7 @@ python-dotenv==1.0.0
 pandas==2.1.4
 openpyxl==3.1.2
 cryptography==41.0.7
+
+# Google Meet integration (optional at runtime; required to create meetings)
+google-apps-meet==0.3.1
+google-auth==2.29.0
