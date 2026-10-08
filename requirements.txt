@@ -1,4 +1,5 @@
 # Auto Email Generator - Python Dependencies
+
 # Flask and related
 flask==3.0.0
 werkzeug==3.0.1
@@ -12,3 +13,21 @@ python-dotenv==1.0.0
 pandas==2.1.4
 openpyxl==3.1.2
 cryptography==41.0.7
+
+# HTTP / Web Scraping
+requests
+urllib3
+beautifulsoup4
+lxml
+
+# Search Engines / Scraping Backends
+ddgs
+duckduckgo-search
+googlesearch-python
+
+# Google Meet API
+google-apps-meet>=0.1.0
+google-auth>=2.0.0
+
+# Production WSGI server
+gunicorn

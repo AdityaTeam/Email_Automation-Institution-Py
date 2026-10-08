@@ -110,7 +110,13 @@
                                     </div>
                                 </div>
                                 <div class="col-12">
-                                    <p class="small text-muted mb-0">LinkedIn emails/phones come only from the LinkedIn profile text. Crawled websites are listed separately below.</p>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="require500" checked>
+                                        <label class="form-check-label small" for="require500">Only profiles with 500+ connections</label>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <p class="small text-muted mb-0">An email/phone is shown on a LinkedIn profile only if it appears in that same person's own LinkedIn profile result. Crawled websites are listed separately below.</p>
                                 </div>
                             </div>
                         </form>
@@ -121,7 +127,7 @@
                 <div id="loader" style="display:none;" class="text-center py-5">
                     <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
                     <h5 class="text-dark">Finding matching LinkedIn profiles...</h5>
-                    <p class="text-muted small">Searching LinkedIn via Google, Bing, Yahoo & DuckDuckGo, then filtering by keyword...</p>
+                    <p class="text-muted small">Searching LinkedIn via Yahoo & DuckDuckGo, then filtering by keyword...</p>
                 </div>
 
                 <!-- Results Output -->
@@ -290,7 +296,8 @@
                             max_results: parseInt(document.getElementById('maxResults').value, 10) || 30,
                             max_pages_per_site: parseInt(document.getElementById('maxPages').value, 10) || 5,
                             max_workers: parseInt(document.getElementById('maxWorkers').value, 10) || 8,
-                            crawl_sites: document.getElementById('crawlSites').checked
+                            crawl_sites: document.getElementById('crawlSites').checked,
+                            require_500_connections: document.getElementById('require500').checked
                         })
                     });
 
@@ -354,7 +361,7 @@
                                         <span class="badge ${engineBadgeClass}">${engineSource}</span>
                                     </div>
                                     <p class="small text-muted mb-1">${esc(p.headline || p.snippet || 'No headline available')}</p>
-                                    <p class="small mb-2"><span class="badge bg-light text-dark border">Keyword matched in: ${esc(p.matched_in || '-')}</span></p>
+                                    <p class="small mb-2"><span class="badge bg-light text-dark border">Keyword matched in: ${esc(p.matched_in || '-')}</span> <span class="badge bg-light text-dark border"><i class="fas fa-user-friends me-1"></i>${esc(p.connections || '-')}</span></p>
                                     <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
                                         ${p.emails && p.emails.length ? `<span class="badge bg-success">${esc(p.emails.join(', '))}</span>` : '<span class="badge bg-light text-muted border">No email on profile</span>'}
                                         ${hasPhone ? `<span class="badge bg-info text-dark"><i class="fas fa-phone me-1"></i>${esc(p.contact_numbers.join(', '))}</span>` : ''}

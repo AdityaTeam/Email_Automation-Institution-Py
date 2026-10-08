@@ -1,126 +1,479 @@
-<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin - Scraped Data Management</title>
+
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
     <style>
-        :root { --admin-primary: #343a40; --primary-color: #4a90d9; }
-        body { background: #f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .sidebar { min-height: 100vh; background: #212529; color: white; }
-        .sidebar .nav-link { color: rgba(255,255,255,0.75); padding: 12px 20px; border-radius: 8px; margin: 5px 10px; transition: all 0.3s; }
-        .sidebar .nav-link:hover, .sidebar .nav-link.active { background: #343a40; color: white; }
-        .sidebar .nav-link i { margin-right: 10px; }
-        .main-content { padding: 30px; }
-        .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); margin-bottom: 20px; }
-        .card-header { background: white; border-bottom: 2px solid #f0f0f0; padding: 15px 20px; font-weight: 600; }
+        :root {
+            --primary-color: #4a90d9;
+            --success-color: #28a745;
+            --danger-color: #dc3545;
+            --info-color: #17a2b8;
+            --warning-color: #ffc107;
+        }
+
+        body {
+            background: #f5f7fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .sidebar {
+            min-height: 100vh;
+            background: white;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .sidebar .nav-link {
+            color: #333;
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin: 5px 10px;
+            transition: all 0.3s;
+        }
+
+        .sidebar .nav-link:hover,
+        .sidebar .nav-link.active {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .sidebar .nav-link i {
+            margin-right: 10px;
+        }
+
+        .main-content {
+            padding: 30px;
+        }
+
+        .page-title {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .page-title i {
+            color: var(--primary-color);
+        }
+
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            background: white;
+            border-bottom: 2px solid #f0f0f0;
+            padding: 15px 20px;
+            font-weight: 600;
+        }
+
+        .card-header i {
+            margin-right: 10px;
+            color: var(--primary-color);
+        }
+
+        .user-info {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 10px;
+        }
+
+        .stats-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+        }
+
+        .stats-card i {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .stats-card .number {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .stats-card .label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .filter-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #666;
+            letter-spacing: 0.02em;
+        }
+
+        .form-control,
+        .form-select {
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+            padding: 10px 12px;
+        }
+
+        .form-control:focus,
+        .form-select:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.2rem rgba(74, 144, 217, 0.15);
+        }
+
+        .table {
+            margin-bottom: 0;
+        }
+
+        .table thead th {
+            color: #555;
+            font-size: 0.82rem;
+            font-weight: 600;
+            white-space: nowrap;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .table tbody td {
+            vertical-align: middle;
+        }
+
+        .table-hover tbody tr:hover {
+            background-color: #f8fbff;
+        }
+
+        .profile-name {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .headline-cell {
+            max-width: 260px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .contact-badge {
+            display: inline-block;
+            margin: 2px 3px 2px 0;
+            max-width: 220px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            vertical-align: middle;
+        }
+
+        .pagination .page-link {
+            color: var(--primary-color);
+            border-radius: 6px;
+            margin: 0 2px;
+        }
+
+        .pagination .page-item.active .page-link {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+            color: white;
+        }
+
+        .card-footer {
+            border-top: 1px solid #f0f0f0;
+            padding: 15px 20px;
+        }
+
+        .btn {
+            border-radius: 8px;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .btn-primary:hover {
+            background: #3d7fbe;
+            border-color: #3d7fbe;
+        }
+
+        .repository-badge {
+            font-size: 0.85rem;
+        }
+
+        @media (max-width: 767.98px) {
+            .sidebar {
+                min-height: auto;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            }
+
+            .main-content {
+                padding: 20px 15px;
+            }
+
+            .page-header {
+                align-items: flex-start !important;
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .page-header .actions {
+                width: 100%;
+            }
+
+            .page-header .actions .btn {
+                width: 100%;
+                margin-bottom: 8px;
+            }
+
+            .page-header .actions .badge {
+                display: inline-block;
+            }
+        }
     </style>
 </head>
+
 <body>
     <div class="container-fluid">
         <div class="row">
-            <!-- Admin Sidebar -->
+
+            <!-- Sidebar - matched to dashboard.html -->
             <div class="col-md-2 sidebar p-0">
-                <div class="p-3 border-bottom border-secondary">
-                    <i class="fas fa-user-shield me-2"></i><strong>Admin Panel</strong>
+
+                <div class="user-info">
+                    <i class="fas fa-user-shield me-2 text-danger"></i>
+                    <strong>{{ username }}</strong>
+                    <span class="badge bg-danger ms-2">Admin</span>
                 </div>
-                <nav class="nav flex-column mt-2">
-                    <a class="nav-link" href="/admin/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a>
-                    <a class="nav-link" href="/admin/users"><i class="fas fa-users"></i> Users</a>
-                    <a class="nav-link active" href="/admin/scraper-logs"><i class="fas fa-database"></i> Scraped Data</a>
-                    <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+
+                <nav class="nav flex-column">
+                    <a class="nav-link" href="/admin">
+                        <i class="fas fa-home"></i> Dashboard
+                    </a>
+
+                    <a class="nav-link" href="/admin/users">
+                        <i class="fas fa-users"></i> Users
+                    </a>
+
+                    <a class="nav-link" href="/admin/templates">
+                        <i class="fas fa-file-alt"></i> Templates
+                    </a>
+
+                    <a class="nav-link" href="/admin/cc">
+                        <i class="fas fa-copy"></i> CC Emails
+                    </a>
+
+                    <a class="nav-link active" href="/admin/scraper-logs">
+                        <i class="fas fa-database"></i> Scraped Data
+                    </a>
+
+                    <a class="nav-link" href="/admin/logs">
+                        <i class="fas fa-history"></i> Logs
+                    </a>
+
+                    <a class="nav-link" href="/logout">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </a>
                 </nav>
+
             </div>
 
-            <!-- Main Workspace -->
+            <!-- Main Content -->
             <div class="col-md-10 main-content">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2><i class="fas fa-database text-dark me-2"></i> Global Scraped Data Repository</h2>
+
+                <!-- Page Header -->
+                <div class="page-header d-flex justify-content-between align-items-center mb-4">
                     <div>
-                        <button class="btn btn-success fw-bold me-2" onclick="exportAdminDataToExcel()">
-                            <i class="fas fa-file-excel me-1"></i> Export Repository to Excel
+                        <h2 class="page-title mb-1">
+                            <i class="fas fa-database me-2"></i> Scraped Data
+                        </h2>
+                        <p class="text-muted mb-0">
+                            Manage and search the global scraped data repository.
+                        </p>
+                    </div>
+
+                    <div class="actions text-end">
+                        <button class="btn btn-success fw-bold me-2"
+                                onclick="exportAdminDataToExcel()">
+                            <i class="fas fa-file-excel me-1"></i>
+                            Export to Excel
                         </button>
-                        <span class="badge bg-dark px-3 py-2" id="totalRecordsBadge">0 Total Records</span>
+
+                        <span class="badge bg-primary px-3 py-2 repository-badge"
+                              id="totalRecordsBadge">
+                            0 Total Records
+                        </span>
                     </div>
                 </div>
 
-                <!-- Filter Controls Card -->
+                <!-- Repository Summary -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="stats-card">
+                            <i class="fas fa-database text-primary"></i>
+                            <div class="number" id="totalRecordsStat">0</div>
+                            <div class="label">Total Scraped Records</div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="stats-card">
+                            <i class="fas fa-user text-info"></i>
+                            <div class="number" id="activeUsersStat">0</div>
+                            <div class="label">Scraping Users</div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="stats-card">
+                            <i class="fas fa-phone text-success"></i>
+                            <div class="number" id="phoneRecordsStat">-</div>
+                            <div class="label">Phone Filter</div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="stats-card">
+                            <i class="fas fa-envelope text-primary"></i>
+                            <div class="number" id="emailRecordsStat">-</div>
+                            <div class="label">Email Filter</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filter Controls -->
                 <div class="card">
-                    <div class="card-header"><i class="fas fa-filter me-2"></i> Filter & Search Records</div>
+                    <div class="card-header">
+                        <i class="fas fa-filter"></i>
+                        Filter & Search Records
+                    </div>
+
                     <div class="card-body">
                         <form id="filterForm" class="row g-3">
+
                             <div class="col-md-4">
-                                <label class="form-label small text-muted">SEARCH QUERY / NAME / EMAIL</label>
-                                <input type="text" id="filterQuery" class="form-control" placeholder="Search name, headline, query...">
+                                <label for="filterQuery" class="form-label filter-label">
+                                    SEARCH QUERY / NAME / EMAIL
+                                </label>
+                                <input type="text"
+                                       id="filterQuery"
+                                       class="form-control"
+                                       placeholder="Search name, headline, query...">
                             </div>
+
                             <div class="col-md-3">
-                                <label class="form-label small text-muted">SCRAPED BY USER ID</label>
+                                <label for="filterUserId" class="form-label filter-label">
+                                    SCRAPED BY USER ID
+                                </label>
                                 <select id="filterUserId" class="form-select">
                                     <option value="">All Users</option>
                                 </select>
                             </div>
+
                             <div class="col-md-2">
-                                <label class="form-label small text-muted">HAS PHONE</label>
+                                <label for="filterHasPhone" class="form-label filter-label">
+                                    HAS PHONE
+                                </label>
                                 <select id="filterHasPhone" class="form-select">
                                     <option value="">All</option>
                                     <option value="true">Yes</option>
                                     <option value="false">No</option>
                                 </select>
                             </div>
+
                             <div class="col-md-2">
-                                <label class="form-label small text-muted">HAS EMAIL</label>
+                                <label for="filterHasEmail" class="form-label filter-label">
+                                    HAS EMAIL
+                                </label>
                                 <select id="filterHasEmail" class="form-select">
                                     <option value="">All</option>
                                     <option value="true">Yes</option>
                                     <option value="false">No</option>
                                 </select>
                             </div>
+
                             <div class="col-md-1 d-flex align-items-end">
-                                <button type="submit" class="btn btn-dark w-100"><i class="fas fa-search"></i></button>
+                                <button type="submit" class="btn btn-primary w-100" title="Search">
+                                    <i class="fas fa-search"></i>
+                                </button>
                             </div>
+
                         </form>
                     </div>
                 </div>
 
-                <!-- Data Table Card -->
+                <!-- Data Table -->
                 <div class="card">
+
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>
+                            <i class="fas fa-table"></i>
+                            Scraped Records
+                        </span>
+
+                        <span class="small text-muted">
+                            <i class="fas fa-shield-alt me-1"></i>
+                            Admin Repository
+                        </span>
+                    </div>
+
                     <div class="card-body p-0">
                         <div class="table-responsive">
+
                             <table class="table table-hover align-middle mb-0">
-                                <thead class="table-light">
+
+                                <thead>
                                     <tr>
                                         <th>#</th>
                                         <th>Profile Name</th>
                                         <th>Headline / Bio</th>
                                         <th>Discovered Contact</th>
-                                        <th>Scraped By (User ID)</th>
+                                        <th>Scraped By</th>
                                         <th>Last Query</th>
                                         <th>Date Scraped</th>
                                         <th>Action</th>
                                     </tr>
                                 </thead>
+
                                 <tbody id="recordsTbody">
                                     <tr>
-                                        <td colspan="8" class="text-center py-4 text-muted">Loading records...</td>
+                                        <td colspan="8" class="text-center py-5 text-muted">
+                                            <div class="spinner-border spinner-border-sm text-primary me-2"
+                                                 role="status"></div>
+                                            Loading records...
+                                        </td>
                                     </tr>
                                 </tbody>
+
                             </table>
+
                         </div>
                     </div>
+
                     <div class="card-footer bg-white d-flex justify-content-between align-items-center">
-                        <span class="small text-muted" id="paginationInfo">Showing page 1</span>
+
+                        <span class="small text-muted" id="paginationInfo">
+                            Showing page 1
+                        </span>
+
                         <ul class="pagination pagination-sm mb-0" id="paginationUl"></ul>
+
                     </div>
+
                 </div>
+
             </div>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
     <script>
         let currentPage = 1;
+        const RECORDS_PER_PAGE = 20;
 
         document.addEventListener('DOMContentLoaded', () => {
             loadScrapedData(1);
@@ -133,94 +486,356 @@
 
         async function loadScrapedData(page = 1) {
             currentPage = page;
-            const query = document.getElementById('filterQuery').value;
+
+            const query = document.getElementById('filterQuery').value.trim();
             const userId = document.getElementById('filterUserId').value;
             const hasPhone = document.getElementById('filterHasPhone').value;
             const hasEmail = document.getElementById('filterHasEmail').value;
 
-            const url = `/api/admin/scraped-data?page=${page}&limit=20&query=${encodeURIComponent(query)}&user_id=${encodeURIComponent(userId)}&has_phone=${hasPhone}&has_email=${hasEmail}`;
+            const url =
+                `/api/admin/scraped-data?page=${page}` +
+                `&limit=${RECORDS_PER_PAGE}` +
+                `&query=${encodeURIComponent(query)}` +
+                `&user_id=${encodeURIComponent(userId)}` +
+                `&has_phone=${hasPhone}` +
+                `&has_email=${hasEmail}`;
+
+            setLoadingState();
 
             try {
                 const response = await fetch(url);
                 const data = await response.json();
 
-                if (response.ok && data.success) {
-                    renderTable(data.profiles, (page - 1) * 20);
-                    renderPagination(data.page, data.total_pages);
-                    document.getElementById('totalRecordsBadge').textContent = `${data.total} Total Records`;
-
-                    if (data.available_users) {
-                        const userSelect = document.getElementById('filterUserId');
-                        const currentVal = userSelect.value;
-                        userSelect.innerHTML = '<option value="">All Users</option>';
-                        data.available_users.forEach(uId => {
-                            if (uId) {
-                                const opt = document.createElement('option');
-                                opt.value = uId;
-                                opt.textContent = uId;
-                                if (uId === currentVal) opt.selected = true;
-                                userSelect.appendChild(opt);
-                            }
-                        });
-                    }
+                if (!response.ok || !data.success) {
+                    throw new Error(data.error || 'Failed to load scraped data.');
                 }
+
+                renderTable(data.profiles, (page - 1) * RECORDS_PER_PAGE);
+                renderPagination(data.page, data.total_pages);
+
+                const total = Number(data.total || 0);
+
+                document.getElementById('totalRecordsBadge').textContent =
+                    `${total.toLocaleString()} Total Records`;
+
+                document.getElementById('totalRecordsStat').textContent =
+                    total.toLocaleString();
+
+                updateFilterStats(data);
+
+                if (data.available_users) {
+                    populateUserFilter(data.available_users);
+                }
+
             } catch (err) {
                 console.error('Error fetching scraped data:', err);
+
+                document.getElementById('recordsTbody').innerHTML = `
+                    <tr>
+                        <td colspan="8" class="text-center py-5">
+                            <div class="text-danger mb-2">
+                                <i class="fas fa-exclamation-triangle fa-2x"></i>
+                            </div>
+                            <strong>Unable to load scraped records</strong>
+                            <div class="small text-muted mt-1">
+                                ${escapeHtml(err.message || 'An unexpected error occurred.')}
+                            </div>
+                            <button class="btn btn-sm btn-primary mt-3"
+                                    onclick="loadScrapedData(${currentPage})">
+                                <i class="fas fa-sync-alt me-1"></i> Retry
+                            </button>
+                        </td>
+                    </tr>
+                `;
             }
+        }
+
+        function setLoadingState() {
+            document.getElementById('recordsTbody').innerHTML = `
+                <tr>
+                    <td colspan="8" class="text-center py-5 text-muted">
+                        <div class="spinner-border spinner-border-sm text-primary me-2"
+                             role="status"></div>
+                        Loading records...
+                    </td>
+                </tr>
+            `;
+        }
+
+        function populateUserFilter(availableUsers) {
+            const userSelect = document.getElementById('filterUserId');
+            const currentVal = userSelect.value;
+
+            userSelect.innerHTML = '<option value="">All Users</option>';
+
+            availableUsers.forEach(userId => {
+                if (!userId) {
+                    return;
+                }
+
+                const option = document.createElement('option');
+                option.value = userId;
+                option.textContent = userId;
+
+                if (userId === currentVal) {
+                    option.selected = true;
+                }
+
+                userSelect.appendChild(option);
+            });
+
+            updateActiveUsersCount(availableUsers);
+        }
+
+        function updateActiveUsersCount(users) {
+            const count = Array.isArray(users)
+                ? users.filter(Boolean).length
+                : 0;
+
+            document.getElementById('activeUsersStat').textContent = count;
+        }
+
+        function updateFilterStats(data) {
+            const hasPhone = document.getElementById('filterHasPhone').value;
+            const hasEmail = document.getElementById('filterHasEmail').value;
+
+            document.getElementById('phoneRecordsStat').textContent =
+                hasPhone === 'true' ? 'Yes' :
+                hasPhone === 'false' ? 'No' : 'All';
+
+            document.getElementById('emailRecordsStat').textContent =
+                hasEmail === 'true' ? 'Yes' :
+                hasEmail === 'false' ? 'No' : 'All';
         }
 
         function renderTable(profiles, offset) {
             const tbody = document.getElementById('recordsTbody');
+
             tbody.innerHTML = '';
 
             if (!profiles || profiles.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted">No scraped records found matching criteria.</td></tr>';
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            <i class="fas fa-database fa-2x mb-3 d-block"></i>
+                            No scraped records found matching the selected criteria.
+                        </td>
+                    </tr>
+                `;
                 return;
             }
 
             profiles.forEach((p, idx) => {
                 const tr = document.createElement('tr');
-                const emailsHtml = (p.emails && p.emails.length) ? p.emails.map(e => `<span class="badge bg-success me-1">${e}</span>`).join('') : '<span class="text-muted small">No Email</span>';
-                const phonesHtml = (p.contact_numbers && p.contact_numbers.length) ? p.contact_numbers.map(ph => `<span class="badge bg-info text-dark me-1">${ph}</span>`).join('') : '';
+
+                const emailsHtml =
+                    p.emails && p.emails.length
+                        ? p.emails.map(email => `
+                            <span class="badge bg-success contact-badge">
+                                <i class="fas fa-envelope me-1"></i>
+                                ${escapeHtml(email)}
+                            </span>
+                        `).join('')
+                        : '<span class="text-muted small">No Email</span>';
+
+                const phonesHtml =
+                    p.contact_numbers && p.contact_numbers.length
+                        ? p.contact_numbers.map(phone => `
+                            <span class="badge bg-info text-dark contact-badge">
+                                <i class="fas fa-phone me-1"></i>
+                                ${escapeHtml(phone)}
+                            </span>
+                        `).join('')
+                        : '';
+
+                const profileUrl = p.profile_url || '#';
 
                 tr.innerHTML = `
-                    <td>${offset + idx + 1}</td>
-                    <td><strong>${p.name || 'LinkedIn Profile'}</strong></td>
-                    <td><div class="small text-muted" style="max-width:250px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${p.headline || p.snippet || 'N/A'}</div></td>
-                    <td>${emailsHtml} ${phonesHtml}</td>
-                    <td><span class="badge bg-secondary">${p.scraped_by_user_id || 'Unknown'}</span></td>
-                    <td><span class="badge bg-light text-dark border">${p.last_query || 'N/A'}</span></td>
-                    <td class="small text-muted">${p.last_scraped_at ? p.last_scraped_at.substring(0, 16).replace('T', ' ') : 'N/A'}</td>
-                    <td><a href="${p.profile_url}" target="_blank" class="btn btn-sm btn-outline-primary"><i class="fab fa-linkedin"></i></a></td>
+                    <td class="text-muted">${offset + idx + 1}</td>
+
+                    <td>
+                        <strong class="profile-name">
+                            ${escapeHtml(p.name || 'LinkedIn Profile')}
+                        </strong>
+                    </td>
+
+                    <td>
+                        <div class="small text-muted headline-cell"
+                             title="${escapeHtml(p.headline || p.snippet || 'N/A')}">
+                            ${escapeHtml(p.headline || p.snippet || 'N/A')}
+                        </div>
+                    </td>
+
+                    <td>
+                        ${emailsHtml}
+                        ${phonesHtml}
+                    </td>
+
+                    <td>
+                        <span class="badge bg-secondary">
+                            ${escapeHtml(p.scraped_by_user_id || 'Unknown')}
+                        </span>
+                    </td>
+
+                    <td>
+                        <span class="badge bg-light text-dark border">
+                            ${escapeHtml(p.last_query || 'N/A')}
+                        </span>
+                    </td>
+
+                    <td class="small text-muted">
+                        ${formatDate(p.last_scraped_at)}
+                    </td>
+
+                    <td>
+                        <a href="${escapeAttribute(profileUrl)}"
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           class="btn btn-sm btn-outline-primary"
+                           title="Open LinkedIn profile"
+                           ${profileUrl === '#' ? 'aria-disabled="true"' : ''}>
+                            <i class="fab fa-linkedin"></i>
+                        </a>
+                    </td>
                 `;
+
                 tbody.appendChild(tr);
             });
         }
 
         function renderPagination(current, totalPages) {
             const ul = document.getElementById('paginationUl');
+
             ul.innerHTML = '';
 
-            document.getElementById('paginationInfo').textContent = `Page ${current} of ${totalPages}`;
+            current = Number(current) || 1;
+            totalPages = Number(totalPages) || 1;
 
-            if (totalPages <= 1) return;
+            document.getElementById('paginationInfo').textContent =
+                `Page ${current} of ${totalPages}`;
 
-            for (let i = 1; i <= totalPages; i++) {
-                const li = document.createElement('li');
-                li.className = `page-item ${i === current ? 'active' : ''}`;
-                li.innerHTML = `<a class="page-link" href="#" onclick="loadScrapedData(${i}); return false;">${i}</a>`;
-                ul.appendChild(li);
+            if (totalPages <= 1) {
+                return;
+            }
+
+            const maxVisiblePages = 7;
+            let startPage = Math.max(1, current - 3);
+            let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+            if ((endPage - startPage + 1) < maxVisiblePages) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+
+            if (current > 1) {
+                addPaginationItem(
+                    ul,
+                    current - 1,
+                    '<i class="fas fa-chevron-left"></i>',
+                    false,
+                    'Previous page'
+                );
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                addPaginationItem(
+                    ul,
+                    i,
+                    i,
+                    i === current,
+                    `Go to page ${i}`
+                );
+            }
+
+            if (current < totalPages) {
+                addPaginationItem(
+                    ul,
+                    current + 1,
+                    '<i class="fas fa-chevron-right"></i>',
+                    false,
+                    'Next page'
+                );
             }
         }
 
+        function addPaginationItem(ul, page, label, active, ariaLabel) {
+            const li = document.createElement('li');
+
+            li.className = `page-item ${active ? 'active' : ''}`;
+
+            li.innerHTML = `
+                <a class="page-link"
+                   href="#"
+                   aria-label="${ariaLabel}"
+                   ${active ? 'aria-current="page"' : ''}
+                   onclick="loadScrapedData(${page}); return false;">
+                    ${label}
+                </a>
+            `;
+
+            ul.appendChild(li);
+        }
+
         function exportAdminDataToExcel() {
-            const query = document.getElementById('filterQuery').value;
+            const query = document.getElementById('filterQuery').value.trim();
             const userId = document.getElementById('filterUserId').value;
             const hasPhone = document.getElementById('filterHasPhone').value;
             const hasEmail = document.getElementById('filterHasEmail').value;
 
-            window.location.href = `/api/admin/export/excel?query=${encodeURIComponent(query)}&user_id=${encodeURIComponent(userId)}&has_phone=${hasPhone}&has_email=${hasEmail}`;
+            const url =
+                `/api/admin/export/excel?query=${encodeURIComponent(query)}` +
+                `&user_id=${encodeURIComponent(userId)}` +
+                `&has_phone=${hasPhone}` +
+                `&has_email=${hasEmail}`;
+
+            window.location.href = url;
+        }
+
+        function formatDate(value) {
+            if (!value) {
+                return 'N/A';
+            }
+
+            try {
+                const date = new Date(value);
+
+                if (Number.isNaN(date.getTime())) {
+                    return String(value).substring(0, 16).replace('T', ' ');
+                }
+
+                return date.toLocaleString([], {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch (error) {
+                return String(value).substring(0, 16).replace('T', ' ');
+            }
+        }
+
+        function escapeHtml(value) {
+            if (value === null || value === undefined) {
+                return '';
+            }
+
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function escapeAttribute(value) {
+            return escapeHtml(value);
         }
     </script>
 </body>
 </html>
+'''
+
+out = Path("/mnt/data/scraper_logs_updated.html")
+out.write_text(updated, encoding="utf-8")
+print(out)
+print("lines:", len(updated.splitlines()))

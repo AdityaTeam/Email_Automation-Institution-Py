@@ -1,10 +1,16 @@
 """
-LinkedIn Profile Scraper (keyword-accurate, 500+ connections authentic profiles only)
+LinkedIn Profile Scraper (keyword-accurate, optional 500+ connections filter, owner-verified contacts)
 
 Pipeline:
-  1. Query Google / Bing / Yahoo / DuckDuckGo restricted to site:linkedin.com/in with 500+ connections requirement
-  2. Keep ONLY profiles whose headline / indexed bio actually contains the keyword AND has 500+ connections
-  3. Extract email / phone ONLY from the LinkedIn result itself
+  1. Query Google / Bing / Yahoo / DuckDuckGo restricted to site:linkedin.com/in
+     (optionally with the 500+ connections requirement - user toggle)
+  2. Keep ONLY profiles whose headline / indexed bio actually contains the keyword
+     (and, when the toggle is on, has 500+ connections)
+  3. Extract email / phone ONLY from that same person's own LinkedIn profile result:
+       - the result URL must be on linkedin.com and be the profile root (not /recent-activity, /posts, ...)
+       - the name in the result title must match the profile URL slug
+       - the email must match the profile owner's name/slug tokens to prevent cross-profile leakage
+       - the email must appear cleanly in the text (not glued to neighbouring words, not truncated with "...")
   4. Provide Excel export API endpoints for User and Admin panels
 """
 
@@ -197,7 +203,6 @@ def _search_google(query: str, max_results: int = 30) -> list[dict]:
 
 
 def _unwrap_bing_url(href: str) -> str:
-    """Bing wraps result links as bing.com/ck/a?...&u=a1<base64-url>. Decode back to the real URL."""
     if "bing.com/ck/a" not in href:
         return href
     m = re.search(r"[?&]u=([^&]+)", href)
@@ -214,7 +219,6 @@ def _unwrap_bing_url(href: str) -> str:
 
 
 def _search_bing(query: str, max_results: int = 30) -> list[dict]:
-    """Bing is also what Microsoft Edge uses, so this covers 'Edge' results."""
     results = []
     headers = {**HTTP_HEADERS, "Referer": "https://www.bing.com/"}
     try:
@@ -311,22 +315,32 @@ def _contains_word(text: str, phrase: str) -> bool:
 
 
 def _has_500_plus_connections(title: str, snippet: str) -> bool:
-    """Strictly checks if the profile text contains proof of 500+ connections or followers."""
     full_text = f"{title} {snippet}"
     if CONNECTIONS_500_PLUS_REGEX.search(full_text):
         return True
     
-    # Check for lower connection count matches to explicitly reject (e.g. 150 connections)
     low_conn_match = re.search(r"(\d+)\s*connections?", full_text, re.I)
     if low_conn_match and int(low_conn_match.group(1)) < 500:
         return False
 
-    return True  # Retain if 500+ operator matched during site search query
+    return True
 
 
-def _relevance_score(headline: str, snippet: str, query: str, raw_title: str) -> tuple[int, str]:
-    # Reject profiles without 500+ connections
-    if not _has_500_plus_connections(raw_title, snippet):
+CONNECTIONS_SHOWN_REGEX = re.compile(r"(\d[\d,]*k?\+?)\s*(?:connections?|followers?)", re.I)
+
+
+def _detect_connections(*texts: str) -> str | None:
+    full_text = " ".join(t for t in texts if t)
+    m = CONNECTIONS_SHOWN_REGEX.search(full_text)
+    if not m:
+        return None
+    kind = "followers" if re.search(r"followers?", m.group(0), re.I) else "connections"
+    return f"{m.group(1)} {kind}"
+
+
+def _relevance_score(headline: str, snippet: str, query: str, raw_title: str,
+                     require_500: bool = True) -> tuple[int, str]:
+    if require_500 and not _has_500_plus_connections(raw_title, snippet):
         return 0, ""
 
     frags = _build_requirements(query)
@@ -348,7 +362,7 @@ def _relevance_score(headline: str, snippet: str, query: str, raw_title: str) ->
 
 
 # ==============================================================================
-# CONTACT EXTRACTION
+# CONTACT EXTRACTION & OWNER VALIDATION
 # ==============================================================================
 
 EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}'
@@ -361,6 +375,15 @@ PHONE_PATTERNS = [
     re.compile(r"(?<!\d)\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}(?!\d)"),
 ]
 
+STRICT_EMAIL_REGEX = re.compile(
+    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"
+)
+COMMON_TLDS = {
+    "com", "org", "net", "edu", "gov", "mil", "int", "info", "biz", "io", "co", "ai", "app", "dev",
+    "me", "us", "uk", "in", "ac", "tech", "xyz", "cloud", "online", "site", "store", "pro", "agency",
+    "digital", "solutions", "consulting", "systems", "services", "global", "group", "email",
+}
+
 
 def _valid_email(email: str) -> bool:
     email = email.lower().strip()
@@ -368,6 +391,71 @@ def _valid_email(email: str) -> bool:
         return False
     domain = email.rsplit("@", 1)[-1]
     return not any(domain == d or domain.endswith("." + d) for d in IGNORED_EMAIL_DOMAINS)
+
+
+def _clean_glued_tld(raw_email: str) -> str | None:
+    local, _, domain = raw_email.rpartition("@")
+    labels = domain.split(".")
+    tld = labels[-1]
+    if not (tld.islower() or tld.isupper()):
+        m = re.match(r"[A-Za-z][a-z]*", tld)
+        tld = m.group(0) if m else tld
+    tld = tld.lower()
+    if tld not in COMMON_TLDS and len(tld) != 2:
+        return None
+    return f"{local}@{'.'.join(labels[:-1] + [tld])}".lower()
+
+
+def _is_email_owner_match(email: str, name: str, slug: str) -> bool:
+    """
+    Verifies if the extracted email prefix plausibly belongs to the profile owner.
+    Prevents cross-profile leakage (e.g., Varsha's email attaching to Sandeep's profile).
+    """
+    if not email or not (name or slug):
+        return True
+
+    local_part = email.split('@')[0].lower()
+    # Normalize local part by stripping digits and symbols
+    local_words = [w for w in re.findall(r'[a-zA-Z]{3,}', local_part) if w not in {'gmail', 'yahoo', 'hotmail', 'outlook', 'mail'}]
+
+    name_tokens = [t.lower() for t in re.findall(r'[a-zA-Z]{2,}', name)] if name else []
+    slug_tokens = _slug_tokens(slug) if slug else []
+
+    all_owner_tokens = set(name_tokens + slug_tokens)
+    if not all_owner_tokens:
+        return True
+
+    # Check direct substring matching
+    for token in all_owner_tokens:
+        if len(token) >= 3 and (token in local_part or local_part in token):
+            return True
+
+    # If the local part contains distinct words that fail to match any token of the owner, reject
+    if local_words and not any(w in all_owner_tokens for w in local_words):
+        return False
+
+    return True
+
+
+def _extract_profile_emails(raw_title: str, snippet: str, owner_name: str = "", slug: str = "") -> set[str]:
+    found = set()
+    for text in [raw_title, snippet]:
+        if not text:
+            continue
+        normalized = re.sub(r'\s*[\[(]\s*at\s*[\])]\s*', '@', text, flags=re.I)
+        normalized = re.sub(r'\s*[\[(]\s*dot\s*[\])]\s*', '.', normalized, flags=re.I)
+
+        for m in STRICT_EMAIL_REGEX.finditer(normalized):
+            tail = normalized[m.end():m.end() + 2]
+            if tail.startswith("…") or tail.startswith(".."):
+                continue
+
+            cleaned = _clean_glued_tld(m.group(0).rstrip("."))
+            if cleaned and _valid_email(cleaned):
+                if _is_email_owner_match(cleaned, owner_name, slug):
+                    found.add(cleaned)
+
+    return found
 
 
 def _extract_emails(*texts: str) -> set[str]:
@@ -409,6 +497,22 @@ def _extract_phones(*texts: str) -> set[str]:
     return set(found.values())
 
 
+def _slug_tokens(slug: str) -> list[str]:
+    return [p for p in re.split(r"[-_.]+", slug.lower()) if p.isalpha() and len(p) >= 2]
+
+
+def _name_matches_slug(name: str, slug: str) -> bool:
+    if not name or name == "LinkedIn Profile":
+        return False
+    name_tokens = {t for t in re.findall(r"[a-z]+", name.lower()) if len(t) >= 2}
+    slug_tokens = _slug_tokens(slug)
+    if not name_tokens or not slug_tokens:
+        return False
+    if any(st in name_tokens for st in slug_tokens):
+        return True
+    return any(nt in st for nt in name_tokens if len(nt) >= 3 for st in slug_tokens)
+
+
 def _clean_profile_name(raw_name: str) -> str:
     if not raw_name:
         return "LinkedIn Profile"
@@ -417,11 +521,18 @@ def _clean_profile_name(raw_name: str) -> str:
     return clean or "LinkedIn Profile"
 
 
-def _normalize_profile_url(href: str) -> str | None:
-    m = re.search(r"linkedin\.com/in/([^/?#\s]+)", href, re.I)
+def _parse_profile_url(href: str) -> tuple[str, str, bool] | None:
+    parsed = urlparse(href)
+    host = parsed.netloc.lower()
+    if not (host == "linkedin.com" or host.endswith(".linkedin.com")):
+        return None
+    m = re.match(r"^/in/([^/?#\s]+)((?:/[^?#\s]*)?)$", parsed.path)
     if not m:
         return None
-    return f"https://www.linkedin.com/in/{unquote(m.group(1)).lower()}"
+    slug = unquote(m.group(1)).lower()
+    rest = [seg for seg in m.group(2).split("/") if seg]
+    is_root = not rest or (len(rest) == 1 and re.fullmatch(r"[a-z]{2}(?:-[a-z]{2})?", rest[0], re.I) is not None)
+    return f"https://www.linkedin.com/in/{slug}", slug, is_root
 
 
 # ==============================================================================
@@ -466,29 +577,31 @@ def _run_engines(q: str, max_results: int) -> list[dict]:
     return items
 
 
-def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dict], int]:
+def fetch_linkedin_profiles(query: str, max_results: int = 20, require_500: bool = True) -> tuple[list[dict], int]:
     phrases = _search_phrases(query)
     primary = phrases[0]
 
-    # Explicitly add 500+ connections criteria to search queries
+    conn = ' "500+ connections"' if require_500 else ""
     variants = [
-        f'site:linkedin.com/in "{p}" "500+ connections"' for p in phrases
+        f'site:linkedin.com/in "{p}"{conn}' for p in phrases
     ]
-    variants.append(f'site:linkedin.com/in "{primary}" "500+ connections" "email" OR "gmail.com" OR "@"')
-    variants.append(f'site:linkedin.com/in "{primary}" "500+ connections" "phone" OR "mobile" OR "+91"')
-    # People who put their email in their headline / About section
-    variants.append(f'site:linkedin.com/in "{primary}" "500+ connections" ("@gmail.com" OR "@outlook.com" OR "@yahoo.com" OR "@hotmail.com")')
-    variants.append(f'site:linkedin.com/in "{primary}" "500+ connections" ("email me" OR "reach me at" OR "contact me at" OR "e-mail")')
+    variants.append(f'site:linkedin.com/in "{primary}"{conn} "email" OR "gmail.com" OR "@"')
+    variants.append(f'site:linkedin.com/in "{primary}"{conn} "phone" OR "mobile" OR "+91"')
+    variants.append(f'site:linkedin.com/in "{primary}"{conn} ("@gmail.com" OR "@outlook.com" OR "@yahoo.com" OR "@hotmail.com")')
+    variants.append(f'site:linkedin.com/in "{primary}"{conn} ("email me" OR "reach me at" OR "contact me at" OR "e-mail")')
 
     candidates: dict[str, dict] = {}
     scanned = 0
 
     for q in variants:
         for item in _run_engines(q, max_results):
-            url = _normalize_profile_url(item.get("url", ""))
-            if not url:
+            parsed_url = _parse_profile_url(item.get("url", ""))
+            if not parsed_url:
                 continue
+            url, slug, is_root = parsed_url
             scanned += 1
+            if not is_root:
+                continue
 
             raw_title = (item.get("title") or "").strip()
             snippet = (item.get("snippet") or "").strip()
@@ -499,9 +612,14 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dic
             if headline:
                 headline = re.sub(r"\s*[|\-–]\s*LinkedIn\s*$", "", headline, flags=re.I).strip() or None
 
-            score, matched_in = _relevance_score(headline, snippet, query, raw_title)
+            score, matched_in = _relevance_score(headline, snippet, query, raw_title, require_500)
             if score == 0:
                 continue
+
+            owned = _name_matches_slug(name, slug)
+            item_emails = _extract_profile_emails(raw_title, snippet, owner_name=name, slug=slug) if owned else set()
+            item_phones = _extract_phones(raw_title, snippet) if owned else set()
+            conn_text = "500+ connections" if require_500 else (_detect_connections(raw_title, snippet) or "Not shown")
 
             entry = candidates.get(url)
             if entry is None:
@@ -510,14 +628,18 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dic
                     "headline": headline, 
                     "profile_url": url,
                     "snippet": snippet, 
-                    "_texts": {raw_title, snippet},
+                    "_emails": set(item_emails),
+                    "_phones": set(item_phones),
                     "relevance_score": score, 
                     "matched_in": matched_in,
                     "engine": item.get("engine", "Search Engine"),
-                    "connections": "500+ connections",
+                    "connections": conn_text,
                 }
             else:
-                entry["_texts"].update({raw_title, snippet})
+                entry["_emails"].update(item_emails)
+                entry["_phones"].update(item_phones)
+                if entry.get("connections") == "Not shown" and conn_text != "Not shown":
+                    entry["connections"] = conn_text
                 if len(snippet) > len(entry["snippet"]):
                     entry["snippet"] = snippet
                 if not entry["headline"] and headline:
@@ -528,9 +650,8 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20) -> tuple[list[dic
 
     profiles = []
     for c in candidates.values():
-        texts = [t for t in c.pop("_texts") if t]
-        emails = _extract_emails(*texts)
-        phones = _extract_phones(*texts)
+        emails = c.pop("_emails")
+        phones = c.pop("_phones")
         profiles.append({
             **c,
             "emails": sorted(emails),
@@ -650,13 +771,14 @@ def _format_profiles_for_excel(profiles: list[dict]) -> pd.DataFrame:
 
 def run_query_email_scraper(query: str, user_id: str, max_linkedin_results: int = 20,
                             max_serp_results: int = 30, max_pages_per_site: int = 5,
-                            max_workers: int = 8, crawl_sites: bool = True):
+                            max_workers: int = 8, crawl_sites: bool = True,
+                            require_500: bool = True):
     start = time.time()
 
     profiles, scanned = [], 0
     target_urls: list[str] = []
     with ThreadPoolExecutor(max_workers=2) as pool:
-        li_future = pool.submit(fetch_linkedin_profiles, query, max_linkedin_results)
+        li_future = pool.submit(fetch_linkedin_profiles, query, max_linkedin_results, require_500)
         if crawl_sites:
             try:
                 target_urls = fetch_serp_urls(query, max_serp_results)
@@ -682,6 +804,7 @@ def run_query_email_scraper(query: str, user_id: str, max_linkedin_results: int 
     output = {
         "query": query,
         "metrics": {
+            "require_500_connections": require_500,
             "total_linkedin_profiles_found": len(profiles),
             "total_linkedin_results_scanned": scanned,
             "profiles_with_email": sum(1 for p in profiles if p["emails"]),
@@ -742,6 +865,7 @@ def api_scrape():
             max_pages_per_site=clamp(payload.get("max_pages_per_site"), 5, 1, 15),
             max_workers=clamp(payload.get("max_workers"), 8, 1, 16),
             crawl_sites=bool(payload.get("crawl_sites", True)),
+            require_500=bool(payload.get("require_500_connections", True)),
         ))
     except Exception as exc:
         return jsonify({"error": f"Scrape failed: {exc}"}), 500
