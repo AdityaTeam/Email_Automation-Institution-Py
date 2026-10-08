@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Departments - Admin Panel</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background: #f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .sidebar { min-height: 100vh; background: white; box-shadow: 2px 0 10px rgba(0, 0, 0, .1); }
+        .sidebar .nav-link { color: #333; padding: 12px 20px; border-radius: 8px; margin: 5px 10px; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background: #4a90d9; color: white; }
+        .sidebar .nav-link i { margin-right: 10px; }
+        .main-content { padding: 30px; }
+        .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, .08); margin-bottom: 20px; }
+        .user-info { padding: 15px 20px; border-bottom: 1px solid #eee; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-2 sidebar">
+            <div class="user-info"><i class="fas fa-user-shield me-2 text-danger"></i><strong>{{ username }}</strong><span class="badge bg-danger ms-2">Admin</span></div>
+            <nav class="nav flex-column">
+                <a class="nav-link" href="/admin"><i class="fas fa-home"></i> Dashboard</a>
+                <a class="nav-link" href="/admin/users"><i class="fas fa-users"></i> Users</a>
+                <a class="nav-link" href="/admin/templates"><i class="fas fa-file-alt"></i> Templates</a>
+                <a class="nav-link active" href="/admin/departments"><i class="fas fa-sitemap"></i> Departments</a>
+                <a class="nav-link" href="/admin/cc"><i class="fas fa-copy"></i> CC Emails</a>
+                <a class="nav-link" href="/admin/logs"><i class="fas fa-history"></i> Logs</a>
+                <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+            </nav>
+        </div>
+        <div class="col-md-10 main-content">
+            <h2 class="mb-4"><i class="fas fa-sitemap text-primary"></i> Department Management</h2>
+            <div id="alertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 9999;"></div>
+            <div class="card">
+                <div class="card-header">Add Department</div>
+                <div class="card-body">
+                    <form id="addDepartmentForm" class="d-flex gap-2">
+                        <input class="form-control" id="departmentName" placeholder="Department name" required>
+                        <button class="btn btn-primary" type="submit"><i class="fas fa-plus"></i> Add</button>
+                    </form>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">Assign Existing Requirements</div>
+                <div class="card-body">
+                    <p class="text-muted">Assignments are manual. Unassigned requirements remain available until you choose a department.</p>
+                    {% if requirements %}
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead><tr><th>Requirement</th><th>Department</th><th></th></tr></thead>
+                            <tbody>
+                            {% for requirement in requirements %}
+                            <tr>
+                                <td>{{ requirement.name }}</td>
+                                <td>
+                                    <select class="form-select requirement-department" data-id="{{ requirement._id }}">
+                                        <option value="">Unassigned</option>
+                                        {% for department in departments %}
+                                        <option value="{{ department._id }}" {% if requirement.department_id == department._id %}selected{% endif %}>{{ department.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td><button class="btn btn-sm btn-outline-primary save-assignment" data-id="{{ requirement._id }}">Save</button></td>
+                            </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}<p class="text-muted mb-0">No requirements exist yet.</p>{% endif %}
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">Departments</div>
+                <div class="card-body">
+                    {% if departments %}
+                    <div class="list-group">
+                        {% for department in departments %}
+                        <div class="list-group-item d-flex gap-2 align-items-center">
+                            <input class="form-control department-name" data-id="{{ department._id }}" value="{{ department.name }}">
+                            <button class="btn btn-outline-primary update-department" data-id="{{ department._id }}">Save</button>
+                            <button class="btn btn-outline-danger delete-department" data-id="{{ department._id }}">Delete</button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}<p class="text-muted mb-0">No departments created yet.</p>{% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function showAlert(type, message) {
+    const alert = document.createElement('div');
+    alert.className = `alert alert-${type}`;
+    alert.textContent = message;
+    document.getElementById('alertContainer').appendChild(alert);
+    setTimeout(() => alert.remove(), 4000);
+}
+async function requestJson(url, method, body) {
+    const response = await fetch(url, { method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Request failed');
+}
+document.getElementById('addDepartmentForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+        await requestJson('/api/admin/departments', 'POST', {name: document.getElementById('departmentName').value.trim()});
+        location.reload();
+    } catch (error) { showAlert('danger', error.message); }
+});
+document.querySelectorAll('.save-assignment').forEach(button => button.addEventListener('click', async () => {
+    const select = document.querySelector(`.requirement-department[data-id="${button.dataset.id}"]`);
+    try {
+        await requestJson(`/api/admin/requirements/${button.dataset.id}`, 'PUT', {name: select.closest('tr').querySelector('td').textContent.trim(), department_id: select.value});
+        showAlert('success', 'Requirement assignment saved.');
+    } catch (error) { showAlert('danger', error.message); }
+}));
+document.querySelectorAll('.update-department').forEach(button => button.addEventListener('click', async () => {
+    const input = document.querySelector(`.department-name[data-id="${button.dataset.id}"]`);
+    try {
+        await requestJson(`/api/admin/departments/${button.dataset.id}`, 'PUT', {name: input.value.trim()});
+        showAlert('success', 'Department updated.');
+    } catch (error) { showAlert('danger', error.message); }
+}));
+document.querySelectorAll('.delete-department').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Delete this department? Requirements will become unassigned; templates will not be changed.')) return;
+    try {
+        await requestJson(`/api/admin/departments/${button.dataset.id}`, 'DELETE');
+        location.reload();
+    } catch (error) { showAlert('danger', error.message); }
+}));
+</script>
+</body>
+</html>

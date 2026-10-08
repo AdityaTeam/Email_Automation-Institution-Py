@@ -318,15 +318,18 @@ class Requirement:
     """Requirement model and helper functions"""
     
     @staticmethod
-    def get_all():
+    def get_all(department_id=None):
         """Get all requirements"""
         db = MongoDB.get_db()
         if db is None:
             return []
-        return list(db[Collections.REQUIREMENTS].find({'is_active': True}))
+        query = {'is_active': True}
+        if department_id:
+            query['department_id'] = ObjectId(department_id)
+        return list(db[Collections.REQUIREMENTS].find(query))
     
     @staticmethod
-    def create(name):
+    def create(name, department_id=None):
         """Create a new requirement"""
         db = MongoDB.get_db()
         if db is None:
@@ -336,19 +339,30 @@ class Requirement:
             'name': name,
             'is_active': True
         }
+        if department_id:
+            req_data['department_id'] = ObjectId(department_id)
         result = db[Collections.REQUIREMENTS].insert_one(req_data)
         req_data['_id'] = result.inserted_id
         return req_data
     
     @staticmethod
-    def update(req_id, name):
+    def update(req_id, name, department_id=None):
         """Update a requirement"""
         db = MongoDB.get_db()
         if db is None:
             return False
+        update_data = {'name': name}
+        if department_id:
+            update_data['department_id'] = ObjectId(department_id)
+            update_operation = {'$set': update_data}
+        else:
+            update_operation = {
+                '$set': update_data,
+                '$unset': {'department_id': ''}
+            }
         result = db[Collections.REQUIREMENTS].update_one(
             {'_id': ObjectId(req_id)},
-            {'$set': {'name': name}}
+            update_operation
         )
         return result.modified_count > 0
     
@@ -361,6 +375,52 @@ class Requirement:
         # Also delete associated templates
         db[Collections.TEMPLATES].delete_many({'requirement_id': ObjectId(req_id)})
         result = db[Collections.REQUIREMENTS].delete_one({'_id': ObjectId(req_id)})
+        return result.deleted_count > 0
+
+
+class Department:
+    """Department model and helper functions"""
+
+    @staticmethod
+    def get_all():
+        db = MongoDB.get_db()
+        if db is None:
+            return []
+        return list(db[Collections.DEPARTMENTS].find({'is_active': True}).sort('name', 1))
+
+    @staticmethod
+    def create(name):
+        db = MongoDB.get_db()
+        if db is None:
+            return None
+        department = {'name': name, 'is_active': True, 'created_at': datetime.utcnow()}
+        result = db[Collections.DEPARTMENTS].insert_one(department)
+        department['_id'] = result.inserted_id
+        return department
+
+    @staticmethod
+    def update(department_id, name):
+        db = MongoDB.get_db()
+        if db is None:
+            return False
+        result = db[Collections.DEPARTMENTS].update_one(
+            {'_id': ObjectId(department_id), 'is_active': True},
+            {'$set': {'name': name}}
+        )
+        return result.matched_count > 0
+
+    @staticmethod
+    def delete(department_id):
+        db = MongoDB.get_db()
+        if db is None:
+            return False
+        department_object_id = ObjectId(department_id)
+        result = db[Collections.DEPARTMENTS].delete_one({'_id': department_object_id})
+        if result.deleted_count:
+            db[Collections.REQUIREMENTS].update_many(
+                {'department_id': department_object_id},
+                {'$unset': {'department_id': ''}}
+            )
         return result.deleted_count > 0
 
 
