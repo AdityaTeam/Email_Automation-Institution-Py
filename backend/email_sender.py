@@ -9,7 +9,6 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 import os 
-from email.mime.image import MIMEImage
 import time
 from email.utils import formatdate
 import re
@@ -139,20 +138,6 @@ class EmailSender:
             msg.attach(alternative_part)
         else:
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
-
-        # ✅ Attach LOGO from folder
-        logo_path = os.path.join(os.getcwd(), "backend", "uploads", "logo", "company_logo.jpeg")
-        if os.path.exists(logo_path):
-            try:
-                with open(logo_path, 'rb') as f:
-                    img = MIMEImage(f.read())
-                    img.add_header('Content-Disposition', 'attachment', filename="company_logo.jpeg")
-                    msg.attach(img)
-                    print("✅ Logo attached")
-            except Exception as e:
-                print("❌ Logo attach error:", e)
-        else:
-            print("⚠️ Logo not found at:", logo_path)
 
         # ✅ Attach files
         import mimetypes
