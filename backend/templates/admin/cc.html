@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CC Emails & Logo - Admin Panel</title>
+    <title>CC Emails - Admin Panel</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -17,9 +17,6 @@
         .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); margin-bottom: 20px; }
         .card-header { background: white; border-bottom: 2px solid #f0f0f0; padding: 15px 20px; font-weight: 600; }
         .card-header i { margin-right: 10px; color: var(--primary-color); }
-        .logo-preview { max-width: 200px; max-height: 100px; border: 2px solid #dee2e6; border-radius: 8px; }
-        .upload-area { border: 2px dashed #ccc; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; background: #fafafa; }
-        .upload-area:hover, .upload-area.dragover { border-color: var(--primary-color); background: #f0f7ff; }
         .user-info { padding: 15px 20px; border-bottom: 1px solid #eee; margin-bottom: 10px; }
     </style>
 </head>
@@ -37,10 +34,9 @@
                     <a class="nav-link" href="/admin"><i class="fas fa-home"></i> Dashboard</a>
                     <a class="nav-link" href="/admin/users"><i class="fas fa-users"></i> Users</a>
                     <a class="nav-link" href="/admin/templates"><i class="fas fa-file-alt"></i> Templates</a>
+                    <a class="nav-link" href="/admin/departments"><i class="fas fa-sitemap"></i> Departments</a>
                     <a class="nav-link active" href="/admin/cc"><i class="fas fa-copy"></i> CC Emails</a>
-                    <a class="nav-link" href="/admin/scraper-logs">
-                        <i class="fas fa-database me-2"></i> Scraped Data
-                    </a>
+                    <a class="nav-link" href="/admin/scraper-logs"><i class="fas fa-database"></i> Scraped Data</a>
                     <a class="nav-link" href="/admin/logs"><i class="fas fa-history"></i> Logs</a>
                     <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
                 </nav>
@@ -88,32 +84,6 @@
                     </div>
                 </div>
                 
-                <!-- Company Logo Management -->
-                <div class="card">
-                    <div class="card-header"><i class="fas fa-image"></i> Company Logo (Email Signature)</div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="upload-area" onclick="document.getElementById('logoFile').click()">
-                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                    <p class="mb-1"><strong>Upload Logo</strong></p>
-                                    <small class="text-muted">PNG/JPG (max 200x100px recommended)</small>
-                                    <input type="file" id="logoFile" accept="image/*" style="display: none;" onchange="uploadLogo()">
-                                </div>
-                            </div>
-                            <div class="col-md-8">
-                                <div id="logoPreview">
-                                    <div class="text-center py-4">
-                                        <i class="fas fa-image fa-4x text-muted"></i>
-                                        <p class="text-muted mt-2">No logo uploaded</p>
-                                        <small>Logo will appear in email signature footer</small>
-                                    </div>
-                                </div>
-                                <div id="logoStatus" class="mt-2"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
@@ -148,10 +118,9 @@
     <script>
         let ccEmails = [];
         
-        // Load CC emails and logo
+        // Load CC emails
         async function loadData() {
             await loadCcEmails();
-            // await loadLogo();
         }
         
         async function loadCcEmails() {
@@ -275,63 +244,6 @@
             }
         }
         
-        // async function loadLogo() {
-        //     try {
-        //         const response = await fetch('/api/admin/logo');
-        //         const data = await response.json();
-        //         const preview = document.getElementById('logoPreview');
-        //         const status = document.getElementById('logoStatus');
-                
-        //         if (data.logo_exists) {
-        //             preview.innerHTML = `
-        //                 <img src="/uploads/logo/company_logo.jpeg" class="logo-preview mx-auto d-block" alt="Company Logo" onerror="this.style.display='none'">
-        //                 <p class="text-success mt-2"><i class="fas fa-check-circle"></i> Logo ready for emails</p>
-        //             `;
-        //             status.innerHTML = `<span class="badge bg-success">Active: ${data.logo_path}</span>`;
-        //         } else {
-        //             preview.innerHTML = `
-        //                 <div class="text-center py-4">
-        //                     <i class="fas fa-image fa-4x text-muted"></i>
-        //                     <p class="text-muted">No logo uploaded</p>
-        //                 </div>
-        //             `;
-        //             status.innerHTML = '<span class="badge bg-secondary">No logo</span>';
-        //         }
-        //     } catch (error) {
-        //         console.error('Error loading logo:', error);
-        //     }
-        // }
-        
-        async function uploadLogo() {
-            const file = document.getElementById('logoFile').files[0];
-            if (!file) return;
-            
-            if (!file.type.startsWith('image/')) {
-                showAlert('warning', 'Please select an image file');
-                return;
-            }
-            
-            const formData = new FormData();
-            formData.append('logo', file);
-            
-            try {
-                const response = await fetch('/api/admin/logo-upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                if (data.success) {
-                    loadLogo();
-                    showAlert('success', 'Logo uploaded successfully');
-                } else {
-                    showAlert('danger', data.error || 'Upload failed');
-                }
-            } catch (error) {
-                showAlert('danger', 'Upload error');
-            }
-        }
-        
         function showAlert(type, message) {
             const container = document.getElementById('alertContainer');
             const alert = document.createElement('div');
@@ -354,5 +266,3 @@
     </script>
 </body>
 </html>
-
-

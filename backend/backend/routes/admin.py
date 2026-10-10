@@ -613,7 +613,7 @@ def get_all_logs():
     })
 
 
-# ==================== CC & Logo Management ====================
+# ==================== CC Email Management ====================
 
 @admin_bp.route('/api/admin/cc-emails', methods=['GET'])
 @require_admin
@@ -665,31 +665,8 @@ def delete_cc_email(cc_id):
 @admin_bp.route('/admin/cc')
 @require_admin
 def cc_management():
-    """CC Emails and Logo management page"""
+    """CC Emails management page"""
     return render_template('admin/cc.html', username=session['username'])
-
-
-@admin_bp.route('/api/admin/logo-upload', methods=['POST'])
-@require_admin
-def upload_logo():
-    """Upload company logo for email signature"""
-    if 'logo' not in request.files:
-        return jsonify({'error': 'No file uploaded'}), 400
-    
-    file = request.files['logo']
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
-    
-    filename = secure_filename(file.filename)
-    if not filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-        return jsonify({'error': 'Only PNG/JPG allowed'}), 400
-    
-    logo_dir = 'backend/uploads/logo'
-    os.makedirs(logo_dir, exist_ok=True)
-    logo_path = os.path.join(logo_dir, 'company_logo.jpeg')
-    
-    file.save(logo_path)
-    return jsonify({'success': True, 'message': 'Logo uploaded successfully'})
 
 
 # ==================== Statistics ====================
