@@ -1,37 +1,33 @@
 # Auto Email Generator - Python Dependencies
 
-# Flask and related
-flask==3.0.0
-werkzeug==3.0.1
+# Core Web Framework
+flask>=3.0.0
+werkzeug>=3.0.1
+gunicorn>=21.2.0
 
-# MongoDB
-pymongo==4.6.0
-dnspython==2.4.2
+# Database & Environment
+pymongo>=4.6.0
+dnspython>=2.4.2
+python-dotenv>=1.0.0
 
-# Utilities
-python-dotenv==1.0.0
-pandas==2.1.4
-openpyxl==3.1.2
-cryptography==41.0.7
+# Data Processing & Export
+pandas>=2.2.0
+openpyxl>=3.1.2
 
-# Google Meet integration (optional at runtime; required to create meetings)
-google-apps-meet==0.3.1
-google-auth==2.29.0
+# Security & Cryptography
+cryptography>=42.0.0
 
-# HTTP / Web Scraping
-requests
-urllib3
-beautifulsoup4
-lxml
+# HTTP & Web Scraping
+requests>=2.31.0
+urllib3>=2.0.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
 
-# Search Engines / Scraping Backends
-ddgs
-duckduckgo-search
-googlesearch-python
+# Search Engines & Scraping Backends
+ddgs>=0.1.0
+duckduckgo-search>=5.0.0
+googlesearch-python>=1.2.3
 
-# Google Meet API
-google-apps-meet>=0.1.0
-google-auth>=2.0.0
-
-# Production WSGI server
-gunicorn
+# Google Meet & Auth Integration
+google-apps-meet>=0.3.1
+google-auth>=2.29.0
