@@ -75,11 +75,15 @@
                     <div class="card-body">
                         <form id="searchForm">
                             <div class="row g-3">
-                                <div class="col-md-8">
+                                <div class="col-md-5">
                                     <label class="form-label font-semibold small text-muted">SEARCH QUERY</label>
-                                    <input type="text" id="query" class="form-control" required value="gen ai engineer" placeholder="e.g. AI Engineer India">
+                                    <input type="text" id="query" class="form-control" required value="gen ai engineer" placeholder="e.g. AI Engineer">
                                 </div>
-                                <div class="col-md-4 d-flex align-items-end">
+                                <div class="col-md-4">
+                                    <label class="form-label font-semibold small text-muted">REGION / LOCATION (OPTIONAL)</label>
+                                    <input type="text" id="region" class="form-control" placeholder="e.g. Delhi, Mumbai, India (Leave blank for All)">
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
                                     <button type="submit" id="submitBtn" class="btn btn-primary w-100 py-2">
                                         <i class="fas fa-play me-2"></i> Run Extraction
                                     </button>
@@ -127,7 +131,7 @@
                 <div id="loader" style="display:none;" class="text-center py-5">
                     <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
                     <h5 class="text-dark">Finding matching LinkedIn profiles...</h5>
-                    <p class="text-muted small">Searching LinkedIn via Yahoo & DuckDuckGo, then filtering by keyword...</p>
+                    <p class="text-muted small">Searching LinkedIn via Yahoo & DuckDuckGo, then filtering by keyword & region...</p>
                 </div>
 
                 <!-- Results Output -->
@@ -234,6 +238,10 @@
                                     <td id="modalProfileEngine"></td>
                                 </tr>
                                 <tr>
+                                    <th class="bg-light">Region / Location</th>
+                                    <td id="modalProfileLocation"></td>
+                                </tr>
+                                <tr>
                                     <th class="bg-light">Discovered Emails</th>
                                     <td id="modalProfileEmails"></td>
                                 </tr>
@@ -275,7 +283,9 @@
                 e.preventDefault();
 
                 const queryInput = document.getElementById('query');
+                const regionInput = document.getElementById('region');
                 const query = queryInput ? queryInput.value.trim() : '';
+                const region = regionInput ? regionInput.value.trim() : '';
                 if (!query) return;
 
                 results.style.display = 'none';
@@ -292,6 +302,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             query: query,
+                            region: region,
                             max_linkedin_results: parseInt(document.getElementById('maxLinkedin').value, 10) || 20,
                             max_results: parseInt(document.getElementById('maxResults').value, 10) || 30,
                             max_pages_per_site: parseInt(document.getElementById('maxPages').value, 10) || 5,
@@ -361,7 +372,7 @@
                                         <span class="badge ${engineBadgeClass}">${engineSource}</span>
                                     </div>
                                     <p class="small text-muted mb-1">${esc(p.headline || p.snippet || 'No headline available')}</p>
-                                    <p class="small mb-2"><span class="badge bg-light text-dark border">Keyword matched in: ${esc(p.matched_in || '-')}</span> <span class="badge bg-light text-dark border"><i class="fas fa-user-friends me-1"></i>${esc(p.connections || '-')}</span></p>
+                                    <p class="small mb-2"><span class="badge bg-light text-dark border">Keyword matched in: ${esc(p.matched_in || '-')}</span> <span class="badge bg-light text-dark border"><i class="fas fa-user-friends me-1"></i>${esc(p.connections || '-')}</span> <span class="badge bg-light text-dark border"><i class="fas fa-map-marker-alt me-1"></i>${esc(p.location || 'Global')}</span></p>
                                     <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
                                         ${p.emails && p.emails.length ? `<span class="badge bg-success">${esc(p.emails.join(', '))}</span>` : '<span class="badge bg-light text-muted border">No email on profile</span>'}
                                         ${hasPhone ? `<span class="badge bg-info text-dark"><i class="fas fa-phone me-1"></i>${esc(p.contact_numbers.join(', '))}</span>` : ''}
@@ -415,6 +426,7 @@
             document.getElementById('modalProfileName').textContent = p.name || 'LinkedIn Profile';
             document.getElementById('modalProfileHeadline').textContent = p.headline || 'N/A';
             document.getElementById('modalProfileEngine').innerHTML = `<span class="badge ${engineBadgeClass}">${engineSource}</span>`;
+            document.getElementById('modalProfileLocation').textContent = p.location || 'Global / Unspecified';
             document.getElementById('modalProfileEmails').innerHTML = (p.emails && p.emails.length) ? p.emails.map(e => `<span class="badge bg-success me-1">${esc(e)}</span>`).join('') : '<span class="text-muted">Not listed on profile</span>';
             document.getElementById('modalProfilePhones').innerHTML = (p.contact_numbers && p.contact_numbers.length) ? p.contact_numbers.map(ph => `<span class="badge bg-info text-dark me-1">${esc(ph)}</span>`).join('') : '<span class="text-muted">Not listed on profile</span>';
             document.getElementById('modalProfileSnippet').textContent = p.snippet || 'No bio snippet recorded.';

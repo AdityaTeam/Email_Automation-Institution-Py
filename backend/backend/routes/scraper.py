@@ -577,18 +577,21 @@ def _run_engines(q: str, max_results: int) -> list[dict]:
     return items
 
 
-def fetch_linkedin_profiles(query: str, max_results: int = 20, require_500: bool = True) -> tuple[list[dict], int]:
+def fetch_linkedin_profiles(query: str, max_results: int = 20, require_500: bool = True, region: str = "") -> tuple[list[dict], int]:
     phrases = _search_phrases(query)
     primary = phrases[0]
 
+    # Append region if provided
+    region_str = f' "{region.strip()}"' if region and region.strip() else ""
+
     conn = ' "500+ connections"' if require_500 else ""
     variants = [
-        f'site:linkedin.com/in "{p}"{conn}' for p in phrases
+        f'site:linkedin.com/in "{p}"{region_str}{conn}' for p in phrases
     ]
-    variants.append(f'site:linkedin.com/in "{primary}"{conn} "email" OR "gmail.com" OR "@"')
-    variants.append(f'site:linkedin.com/in "{primary}"{conn} "phone" OR "mobile" OR "+91"')
-    variants.append(f'site:linkedin.com/in "{primary}"{conn} ("@gmail.com" OR "@outlook.com" OR "@yahoo.com" OR "@hotmail.com")')
-    variants.append(f'site:linkedin.com/in "{primary}"{conn} ("email me" OR "reach me at" OR "contact me at" OR "e-mail")')
+    variants.append(f'site:linkedin.com/in "{primary}"{region_str}{conn} "email" OR "gmail.com" OR "@"')
+    variants.append(f'site:linkedin.com/in "{primary}"{region_str}{conn} "phone" OR "mobile" OR "+91"')
+    variants.append(f'site:linkedin.com/in "{primary}"{region_str}{conn} ("@gmail.com" OR "@outlook.com" OR "@yahoo.com" OR "@hotmail.com")')
+    variants.append(f'site:linkedin.com/in "{primary}"{region_str}{conn} ("email me" OR "reach me at" OR "contact me at" OR "e-mail")')
 
     candidates: dict[str, dict] = {}
     scanned = 0
@@ -634,6 +637,7 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20, require_500: bool
                     "matched_in": matched_in,
                     "engine": item.get("engine", "Search Engine"),
                     "connections": conn_text,
+                    "location": region if region else "Global / Unspecified"
                 }
             else:
                 entry["_emails"].update(item_emails)
@@ -769,19 +773,23 @@ def _format_profiles_for_excel(profiles: list[dict]) -> pd.DataFrame:
 # ORCHESTRATION & ROUTES
 # ==============================================================================
 
-def run_query_email_scraper(query: str, user_id: str, max_linkedin_results: int = 20,
+def run_query_email_scraper(query: str, user_id: str, region: str = "",
+                            max_linkedin_results: int = 20,
                             max_serp_results: int = 30, max_pages_per_site: int = 5,
                             max_workers: int = 8, crawl_sites: bool = True,
                             require_500: bool = True):
     start = time.time()
 
+    # Combine query with region if provided
+    full_search_query = f"{query} {region}".strip() if region else query
+
     profiles, scanned = [], 0
     target_urls: list[str] = []
     with ThreadPoolExecutor(max_workers=2) as pool:
-        li_future = pool.submit(fetch_linkedin_profiles, query, max_linkedin_results, require_500)
+        li_future = pool.submit(fetch_linkedin_profiles, query, max_linkedin_results, require_500, region)
         if crawl_sites:
             try:
-                target_urls = fetch_serp_urls(query, max_serp_results)
+                target_urls = fetch_serp_urls(full_search_query, max_serp_results)
             except Exception as exc:
                 print(f"[X] Website discovery failed: {exc}")
         profiles, scanned = li_future.result()
@@ -803,6 +811,7 @@ def run_query_email_scraper(query: str, user_id: str, max_linkedin_results: int 
 
     output = {
         "query": query,
+        "region": region if region else "All / Unspecified",
         "metrics": {
             "require_500_connections": require_500,
             "total_linkedin_profiles_found": len(profiles),
@@ -822,7 +831,7 @@ def run_query_email_scraper(query: str, user_id: str, max_linkedin_results: int 
     }
 
     try:
-        storage = save_to_mongo(query, user_id, profiles, sites, output["metrics"])
+        storage = save_to_mongo(full_search_query, user_id, profiles, sites, output["metrics"])
         output["metrics"]["profiles_saved_to_mongodb"] = storage["linkedin_profiles_saved"]
         output["storage"] = storage
     except (PyMongoError, RuntimeError) as exc:
@@ -846,6 +855,7 @@ def api_scrape():
 
     payload = request.get_json(silent=True) or {}
     query = (payload.get("query") or "").strip()
+    region = (payload.get("region") or "").strip()
     user_id = str(session['user_id'])
     if not query:
         return jsonify({"error": "A search query is required."}), 400
@@ -860,6 +870,7 @@ def api_scrape():
         return jsonify(run_query_email_scraper(
             query=query,
             user_id=user_id,
+            region=region,
             max_linkedin_results=clamp(payload.get("max_linkedin_results"), 20, 1, 50),
             max_serp_results=clamp(payload.get("max_results"), 30, 1, 100),
             max_pages_per_site=clamp(payload.get("max_pages_per_site"), 5, 1, 15),
