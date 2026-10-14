@@ -8,7 +8,7 @@ Pipeline:
   3. Emails / phone numbers come from LinkedIn profiles ONLY (no other source is read).
   4. Standard search (fast), "Load more" (next batch per platform) and Deep Search
      (background job, many query rounds, 100+ profiles).
-  5. Results stored in MongoDB; Excel export endpoints.
+  5. Results stored in MongoDB; Excel export endpoints & Admin Repository filtering.
 """
 
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, send_file
@@ -81,7 +81,6 @@ SEARCH_PHRASE_ALTERNATES = {
     "generative ai": ["genai", "gen ai"],
 }
 
-
 CONNECTIONS_500_PLUS_REGEX = re.compile(
     r"(?:500\+\s*(?:connections?|followers?|contacts?)|[1-9]\d{0,2}k\+\s*(?:connections?|followers?)|over\s*500\s*connections?)",
     re.I
@@ -104,6 +103,8 @@ def get_db():
     db = _mongo_client[MONGO_DB_NAME]
     db.linkedin_profiles.create_index("profile_url", unique=True)
     db.sites.create_index("domain", unique=True)
+    db.scrape_jobs.create_index("job_id", unique=True)
+    db.scrape_jobs.create_index([("user_id", 1), ("status", 1)])
     return db
 
 
@@ -115,7 +116,13 @@ def save_to_mongo(query: str, user_id: str, profiles: list[dict], sites: list[di
         UpdateOne(
             {"profile_url": p["profile_url"]},
             {
-                "$set": {**p, "last_query": query, "last_scraped_at": now, "scraped_by_user_id": user_id},
+                "$set": {
+                    **p,
+                    "platform": _canonical_platform_label(p.get("platform") or "LinkedIn"),
+                    "last_query": query,
+                    "last_scraped_at": now,
+                    "scraped_by_user_id": user_id
+                },
                 "$addToSet": {"scraped_by_users": user_id},
                 "$setOnInsert": {"first_scraped_at": now},
             },
@@ -151,9 +158,8 @@ def save_to_mongo(query: str, user_id: str, profiles: list[dict], sites: list[di
     return {"run_id": str(run.inserted_id), "linkedin_profiles_saved": len(profile_ops), "sites_saved": len(site_ops)}
 
 
-
 # ==============================================================================
-# SEARCH ENGINES (all engines accept `page` so deeper result pages can be read)
+# SEARCH ENGINES
 # ==============================================================================
 
 def _search_duckduckgo(query: str, max_results: int = 30, page: int = 0) -> list[dict]:
@@ -163,7 +169,6 @@ def _search_duckduckgo(query: str, max_results: int = 30, page: int = 0) -> list
             try:
                 raw = ddgs.text(query, max_results=max_results, page=page + 1)
             except TypeError:
-                # very old duckduckgo_search releases have no paging
                 if page:
                     return results
                 raw = ddgs.text(query, max_results=max_results)
@@ -186,7 +191,6 @@ def _search_google(query: str, max_results: int = 30, page: int = 0) -> list[dic
             try:
                 hits = google_search(query, **kwargs)
             except TypeError:
-                # installed googlesearch version has no start_num
                 if page:
                     return results
                 hits = google_search(query, num_results=max_results, advanced=True)
@@ -382,13 +386,6 @@ def _verify_region_match(full_text: str, region: str) -> bool:
 
 def _relevance_score(headline: str, snippet: str, query: str, raw_title: str,
                      require_500: bool = True, region: str = "", loose: bool = False) -> tuple[int, str]:
-    """
-    Strict mode (default, original behaviour): all role keywords in the headline, or the
-    role phrase inside the bio snippet.
-    Loose mode (Deep Search / Load more): additionally accepts profiles where at least 60% of
-    the role keywords appear somewhere in headline+snippet. These get score 1 / "partial"
-    so they always sort below exact matches.
-    """
     if require_500 and not _has_500_plus_connections(raw_title, snippet):
         return 0, ""
 
@@ -590,7 +587,6 @@ def _parse_profile_url(href: str) -> tuple[str, str, bool] | None:
     return f"https://www.linkedin.com/in/{slug}", slug, is_root
 
 
-
 # ==============================================================================
 # LINKEDIN DISCOVERY
 # ==============================================================================
@@ -608,13 +604,6 @@ def _search_phrases(query: str) -> list[str]:
             break
     return phrases[:3]
 
-
-# ------------------------------------------------------------------------------
-# Search-variant "rounds": round 0 is the original query set (fast, most precise).
-# Rounds 1..N widen the net (location spellings, seniority words, employers, looser
-# keyword windows). Standard search runs round 0, "Load more" runs the next round,
-# Deep Search runs every round until the target is reached or the time budget ends.
-# ------------------------------------------------------------------------------
 
 VARIANTS_PER_ROUND = 8
 
@@ -638,7 +627,6 @@ def _tidy(q: str) -> str:
 
 
 def _chunk_rounds(base: list[str], pool: list[str], per_round: int = VARIANTS_PER_ROUND) -> list[list[str]]:
-    """[[round 0 = base], [round 1], [round 2], ...] with duplicates removed."""
     base = list(dict.fromkeys(_tidy(q) for q in base))
     seen = set(base)
     extra = []
@@ -656,7 +644,6 @@ def _loc_pattern(region: str) -> str:
 
 
 def _location_variants(region: str) -> list[str]:
-    """Individual location spellings LinkedIn uses, tried one at a time in deeper rounds."""
     r = (region or "").strip()
     if not r:
         return [""]
@@ -674,25 +661,23 @@ def _linkedin_rounds(query: str, region: str, require_500: bool) -> list[list[st
     conn = ' "500+ connections"' if require_500 else ""
     tokens = [t for t in re.findall(r"[A-Za-z0-9+#.]+", query) if t.lower() not in STOPWORDS]
 
-    # ---- round 0: the original variants, unchanged ----
     base = [f'site:linkedin.com/in "{p}" {loc_pattern}{conn}' for p in phrases]
     base.append(f'site:linkedin.com/in "{primary}" {loc_pattern}{conn} ("email" OR "gmail.com" OR "@")')
     base.append(f'site:linkedin.com/in "{primary}" {loc_pattern}{conn} ("phone" OR "mobile" OR "+91")')
     base.append(f'site:linkedin.com/in "{primary}" {loc_pattern}{conn} ("@gmail.com" OR "@outlook.com" OR "@yahoo.com")')
 
-    # ---- rounds 1..N ----
     pool: list[str] = []
-    for loc in _location_variants(region):                       # one location spelling at a time
+    for loc in _location_variants(region):
         for p in phrases:
             pool.append(f'site:linkedin.com/in "{p}" {loc}{conn}')
-    if require_500:                                              # same query without the 500+ phrase
+    if require_500:
         for p in phrases:
             pool.append(f'site:linkedin.com/in "{p}" {loc_pattern}')
-    for mod in DEEP_ROLE_MODIFIERS:                              # seniority / flavour words
+    for mod in DEEP_ROLE_MODIFIERS:
         pool.append(f'site:linkedin.com/in "{primary}" {loc_pattern}{conn} {mod}')
-    for comp in DEEP_COMPANY_HINTS:                              # employers
+    for comp in DEEP_COMPANY_HINTS:
         pool.append(f'site:linkedin.com/in "{primary}" {loc_pattern}{conn} "{comp}"')
-    for w in _query_windows(tokens)[1:]:                         # looser keyword sets
+    for w in _query_windows(tokens)[1:]:
         pool.append(f'site:linkedin.com/in "{w}" {loc_pattern}{conn}')
         pool.append(f'site:linkedin.com/in {w} {loc_pattern}')
     return _chunk_rounds(base, pool)
@@ -702,11 +687,6 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20, require_500: bool
                             *, deep: bool = False, round_no: int = 0, exclude=None, target: int = 120,
                             deadline: float | None = None, cancel=None, report=None,
                             diag: dict | None = None) -> tuple[list[dict], int]:
-    """
-    Returns (profiles, results_scanned).  `diag` receives: summary, next_round, exhausted.
-    Contact info (emails / phones) is read ONLY from the LinkedIn search-result title/snippet
-    of the profile itself and only when the name matches the profile slug.
-    """
     diag = diag if diag is not None else {}
     exclude = {u.lower().rstrip("/") for u in (exclude or [])}
     rounds = _linkedin_rounds(query, region, require_500)
@@ -836,13 +816,6 @@ def fetch_linkedin_profiles(query: str, max_results: int = 20, require_500: bool
 
 # ==============================================================================
 # PERSON-PROFILE SOURCES (trusted platforms only)
-# ------------------------------------------------------------------------------
-#   LinkedIn      : public profiles via search index (fetch_linkedin_profiles)
-#   GitHub        : official REST API - profile fields only (no contact info read)
-#   Y Combinator  : founders listed on official ycombinator.com/companies pages
-#   Wellfound     : public candidate profiles (wellfound.com/u/...) via search index
-# Naukri / Indeed were dropped: their public pages are job listings and their
-# resume databases are login/employer-only, so they expose no person data.
 # ==============================================================================
 
 ALL_SOURCES = ("linkedin", "github", "yc", "wellfound")
@@ -851,11 +824,10 @@ SOURCE_LABELS = {
     "yc": "Y Combinator", "wellfound": "Wellfound",
 }
 GITHUB_API = "https://api.github.com"
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # optional, raises API limit from 60 to 5000 req/hour
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
 
 def _new_person(**kw) -> dict:
-    """Common person schema shared by every platform."""
     p = {
         "name": "", "headline": None, "bio": "", "company": None, "location": "",
         "emails": [], "contact_numbers": [], "profile_url": "", "website": None,
@@ -870,7 +842,6 @@ def _new_person(**kw) -> dict:
 
 
 def _location_matches(text: str, region: str) -> bool:
-    """Most specific part of the region (text before the first comma) must appear in text."""
     if not region or not region.strip():
         return True
     if not text:
@@ -891,14 +862,12 @@ def _warn(warn, msg: str):
 
 
 def _match_fraction(text: str, frags: list[str]) -> float:
-    """Share of required role keywords found in text (1.0 = all)."""
     if not frags or not text:
         return 0.0
     return sum(1 for f in frags if re.search(_B_L + f + _B_R, text, re.I)) / len(frags)
 
 
 def _query_windows(tokens: list[str]) -> list[str]:
-    """Progressively looser keyword sets: full, then n-1 contiguous words, then single words (2-word roles)."""
     out = [" ".join(tokens)] if tokens else []
     n = len(tokens)
     if n >= 3:
@@ -917,6 +886,70 @@ def _walk_for_key(obj, key):
     elif isinstance(obj, list):
         for v in obj:
             yield from _walk_for_key(v, key)
+
+
+_LINKEDIN_IN_TEXT_RE = re.compile(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/[^\s/?#,;)\]]+", re.I)
+
+
+def _find_linkedin_url(*texts: str) -> str | None:
+    for t in texts:
+        m = _LINKEDIN_IN_TEXT_RE.search(t or "")
+        if m:
+            u = m.group(0)
+            return u if u.lower().startswith("http") else "https://" + u
+    return None
+
+
+def _linkedin_contact_lookup(person: dict) -> tuple[set[str], set[str]]:
+    li = (person.get("links") or {}).get("linkedin") or ""
+    parsed = _parse_profile_url(li) if li else None
+    if not parsed:
+        return set(), set()
+    _, slug, _ = parsed
+    name = person.get("name") or ""
+    if not _name_matches_slug(name, slug):
+        return set(), set()
+    emails: set[str] = set()
+    phones: set[str] = set()
+    for engine in (_search_bing, _search_duckduckgo):
+        try:
+            hits = engine(f"site:linkedin.com/in/{slug}", 10)
+        except Exception:
+            hits = []
+        for hit in hits:
+            p = _parse_profile_url(hit.get("url", ""))
+            if not p or p[1] != slug:
+                continue
+            title, snippet = hit.get("title") or "", hit.get("snippet") or ""
+            emails |= _extract_profile_emails(title, snippet, owner_name=name, slug=slug)
+            phones |= _extract_phones(title, snippet)
+        if emails or phones:
+            break
+    return emails, phones
+
+
+def enrich_contacts_from_linkedin(people: list[dict], limit: int = 30, cancel=None) -> int:
+    targets = [p for p in people if (p.get("links") or {}).get("linkedin")][:limit]
+    hit_count = 0
+    if not targets:
+        return 0
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futs = {pool.submit(_linkedin_contact_lookup, p): p for p in targets}
+        for f in as_completed(futs):
+            if cancel is not None and cancel.is_set():
+                break
+            p = futs[f]
+            try:
+                emails, phones = f.result()
+            except Exception:
+                continue
+            if emails or phones:
+                p["emails"] = sorted(set(p.get("emails", [])) | emails)
+                p["contact_numbers"] = sorted(set(p.get("contact_numbers", [])) | phones)
+                p["contact_number"] = p["contact_numbers"][0] if p["contact_numbers"] else None
+                p["contact_source"] = "linkedin_profile_text"
+                hit_count += 1
+    return hit_count
 
 
 # ---------------------------------------------------------------- GitHub ------
@@ -944,87 +977,10 @@ def _github_get(path: str, params: dict | None = None, warn: list | None = None)
     return None
 
 
-
-
-# ------------------------------------------------------------------------------
-# Contact details: LinkedIn ONLY.
-# GitHub / Y Combinator / Wellfound records never carry an email or phone of their own.
-# If such a person links to their LinkedIn profile, the contact info shown on that
-# LinkedIn profile (as exposed in LinkedIn's public search snippet) is attached.
-# ------------------------------------------------------------------------------
-
-_LINKEDIN_IN_TEXT_RE = re.compile(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/[^\s/?#,;)\]]+", re.I)
-
-
-def _find_linkedin_url(*texts: str) -> str | None:
-    for t in texts:
-        m = _LINKEDIN_IN_TEXT_RE.search(t or "")
-        if m:
-            u = m.group(0)
-            return u if u.lower().startswith("http") else "https://" + u
-    return None
-
-
-def _linkedin_contact_lookup(person: dict) -> tuple[set[str], set[str]]:
-    li = (person.get("links") or {}).get("linkedin") or ""
-    parsed = _parse_profile_url(li) if li else None
-    if not parsed:
-        return set(), set()
-    _, slug, _ = parsed
-    name = person.get("name") or ""
-    if not _name_matches_slug(name, slug):      # never attach contacts to a possibly different person
-        return set(), set()
-    emails: set[str] = set()
-    phones: set[str] = set()
-    for engine in (_search_bing, _search_duckduckgo):
-        try:
-            hits = engine(f"site:linkedin.com/in/{slug}", 10)
-        except Exception:
-            hits = []
-        for hit in hits:
-            p = _parse_profile_url(hit.get("url", ""))
-            if not p or p[1] != slug:
-                continue
-            title, snippet = hit.get("title") or "", hit.get("snippet") or ""
-            emails |= _extract_profile_emails(title, snippet, owner_name=name, slug=slug)
-            phones |= _extract_phones(title, snippet)
-        if emails or phones:
-            break
-    return emails, phones
-
-
-def enrich_contacts_from_linkedin(people: list[dict], limit: int = 30, cancel=None) -> int:
-    """Attach LinkedIn-profile contact info to non-LinkedIn people that link to a LinkedIn profile."""
-    targets = [p for p in people if (p.get("links") or {}).get("linkedin")][:limit]
-    hit_count = 0
-    if not targets:
-        return 0
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futs = {pool.submit(_linkedin_contact_lookup, p): p for p in targets}
-        for f in as_completed(futs):
-            if cancel is not None and cancel.is_set():
-                break
-            p = futs[f]
-            try:
-                emails, phones = f.result()
-            except Exception:
-                continue
-            if emails or phones:
-                p["emails"] = sorted(set(p.get("emails", [])) | emails)
-                p["contact_numbers"] = sorted(set(p.get("contact_numbers", [])) | phones)
-                p["contact_number"] = p["contact_numbers"][0] if p["contact_numbers"] else None
-                p["contact_source"] = "linkedin_profile_text"
-                hit_count += 1
-    return hit_count
-
-
-# ---------------------------------------------------------------- GitHub ------
-
 def fetch_github_people(query: str, max_results: int = 15, region: str = "",
                         warn: list | None = None, diag: dict | None = None, *,
                         round_no: int = 0, exclude=None, deep: bool = False,
                         cancel=None, report=None) -> list[dict]:
-    """`round_no` is the zero-based GitHub search page. Deep Search reads 3 pages per query."""
     diag = diag if diag is not None else {}
     exclude = {u.lower().rstrip("/") for u in (exclude or [])}
     seg = region.split(",")[0].strip() if region else ""
@@ -1035,7 +991,7 @@ def fetch_github_people(query: str, max_results: int = 15, region: str = "",
     queries += [f"{w} in:bio type:user{loc_q}" for w in _query_windows(tokens)]
     queries = list(dict.fromkeys(queries))
     if not GITHUB_TOKEN:
-        queries = queries[:3]          # unauthenticated search API allows only ~10 calls/minute
+        queries = queries[:3]
 
     pages = list(range(round_no, round_no + 3)) if deep else [round_no]
     pause = 0.3 if GITHUB_TOKEN else 1.2
@@ -1089,7 +1045,7 @@ def fetch_github_people(query: str, max_results: int = 15, region: str = "",
         links = {}
         if d.get("twitter_username"):
             links["twitter"] = f"https://x.com/{d['twitter_username']}"
-        li = _find_linkedin_url(d.get("blog"), bio)       # only used to look up LinkedIn contact info
+        li = _find_linkedin_url(d.get("blog"), bio)
         if li:
             links["linkedin"] = li
         return _new_person(
@@ -1170,7 +1126,7 @@ def _yc_company_people(url: str, region: str) -> list[dict]:
             people.append(_new_person(
                 name=fname, headline=f"{title} at {company}" if company else title,
                 bio=bio or one_liner, company=company or None, location=location,
-                emails=[], contact_numbers=[],            # contact info comes from LinkedIn only
+                emails=[], contact_numbers=[],
                 profile_url=f"{url}#{slug}", website=None, links=links,
                 platform="Y Combinator", engine="ycombinator.com company page",
                 source_type="official_site", contact_source=None,
@@ -1243,10 +1199,6 @@ def fetch_yc_people(query: str, max_results: int = 15, region: str = "", *,
 
 
 # ------------------------------------------------------------ Wellfound -------
-# Wellfound keeps most candidate profiles behind a login, so search engines index only
-# the few profiles people made public. Strategy: run the precise queries first; if they
-# find nothing, automatically fall back to broader queries (no location in the query, no
-# site:/path operator, angel.co legacy URLs) and a relaxed role filter.
 
 _WELLFOUND_PATH_RE = re.compile(r"^/(u|p)/([^/?#\s]+)(?:/.*)?$")
 
@@ -1329,7 +1281,7 @@ def fetch_wellfound_people(query: str, max_results: int = 15, region: str = "",
                 candidates[url] = _new_person(
                     name=name, headline=headline, bio=snippet,
                     location=(region.title() if (region and loc_ok) else ""),
-                    emails=[], contact_numbers=[], profile_url=url,    # contact info comes from LinkedIn only
+                    emails=[], contact_numbers=[], profile_url=url,
                     extra={"location_verified": bool(loc_ok), "relevance": rel},
                     platform="Wellfound", engine=item.get("engine", "Search Engine"),
                     source_type="search_index", contact_source=None, snippet=snippet,
@@ -1398,15 +1350,12 @@ def _format_profiles_for_excel(profiles: list[dict]) -> pd.DataFrame:
     ])
 
 
-
-
 # ==============================================================================
 # ORCHESTRATION
 # ==============================================================================
 
 DEEP_TARGET_DEFAULT = 120
 DEEP_TIME_BUDGET_SECONDS = int(os.getenv("DEEP_SEARCH_BUDGET_SECONDS", "600"))
-JOB_TTL_SECONDS = 3600
 
 
 def run_query_email_scraper(query: str, user_id: str, region: str = "",
@@ -1415,14 +1364,6 @@ def run_query_email_scraper(query: str, user_id: str, region: str = "",
                             target: int = DEEP_TARGET_DEFAULT, more: str | None = None,
                             round_no: int = 0, exclude: list | None = None,
                             progress=None, cancel=None):
-    """
-    Modes
-      standard : round 0 of every selected platform (fast).
-      deep     : every search round, 2 result pages per query, loose matching; keeps going until
-                 `target` LinkedIn profiles are found or DEEP_TIME_BUDGET_SECONDS is used up.
-      more     : `more="<platform>"` + `round_no` -> next batch for ONE platform, skipping `exclude` URLs.
-    Emails / phone numbers are taken from LinkedIn profiles only.
-    """
     start = time.time()
     selected = [s for s in (sources or ALL_SOURCES) if s in ALL_SOURCES] or list(ALL_SOURCES)
     if more in ALL_SOURCES:
@@ -1494,8 +1435,6 @@ def run_query_email_scraper(query: str, user_id: str, region: str = "",
 
     cancelled = bool(cancel is not None and cancel.is_set())
 
-    # LinkedIn is the only source of contact details: look up the LinkedIn profile of
-    # people from other platforms (only when they link to one).
     others = [p for k in ALL_SOURCES if k != "linkedin" for p in found[k]]
     if others and not cancelled:
         if progress:
@@ -1563,46 +1502,89 @@ def run_query_email_scraper(query: str, user_id: str, region: str = "",
 
 
 # ==============================================================================
-# BACKGROUND JOBS (deep search can take minutes - far longer than an HTTP request should live)
-# NOTE: jobs live in this process's memory. Run the app as a single worker process
-# (threads are fine) or move this dict to Redis/MongoDB if you scale to several workers.
+# BACKGROUND JOBS (MONGODB PERSISTED TO PREVENT PM2 RESTART LOSS)
 # ==============================================================================
 
-_JOBS: dict[str, dict] = {}
-_JOBS_LOCK = threading.Lock()
-
-
-def _prune_jobs():
-    now = time.time()
-    with _JOBS_LOCK:
-        for jid in [j for j, v in _JOBS.items() if now - v["created"] > JOB_TTL_SECONDS]:
-            _JOBS.pop(jid, None)
+_ACTIVE_CANCEL_EVENTS: dict[str, threading.Event] = {}
+_ACTIVE_LOCK = threading.Lock()
 
 
 def _user_has_running_job(user_id: str) -> bool:
-    with _JOBS_LOCK:
-        return any(v["user_id"] == user_id and v["status"] == "running" for v in _JOBS.values())
+    try:
+        db = get_db()
+        running_job = db.scrape_jobs.find_one({"user_id": user_id, "status": "running"})
+        return running_job is not None
+    except Exception:
+        return False
 
 
 def _start_job(user_id: str, kwargs: dict) -> str:
-    _prune_jobs()
+    db = get_db()
     job_id = uuid.uuid4().hex
-    cancel = threading.Event()
-    job = {"id": job_id, "user_id": user_id, "status": "running", "percent": 0, "message": "Queued...",
-           "counts": {}, "result": None, "error": None, "created": time.time(), "cancel": cancel}
-    with _JOBS_LOCK:
-        _JOBS[job_id] = job
+    cancel_event = threading.Event()
+
+    with _ACTIVE_LOCK:
+        _ACTIVE_CANCEL_EVENTS[job_id] = cancel_event
+
+    job_doc = {
+        "job_id": job_id,
+        "user_id": user_id,
+        "status": "running",
+        "percent": 0,
+        "message": "Queued...",
+        "counts": {},
+        "result": None,
+        "error": None,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc)
+    }
+    db.scrape_jobs.insert_one(job_doc)
 
     def progress(percent, message, counts):
-        job["percent"], job["message"], job["counts"] = percent, message, dict(counts)
+        try:
+            db.scrape_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {
+                    "percent": percent,
+                    "message": message,
+                    "counts": dict(counts),
+                    "updated_at": datetime.now(timezone.utc)
+                }}
+            )
+        except Exception as e:
+            print(f"[!] Mongo job progress update warning: {e}")
 
     def worker():
         try:
-            job["result"] = run_query_email_scraper(user_id=user_id, progress=progress, cancel=cancel, **kwargs)
-            job["status"] = "done"
+            res = run_query_email_scraper(
+                user_id=user_id,
+                progress=progress,
+                cancel=cancel_event,
+                **kwargs
+            )
+            db.scrape_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {
+                    "status": "done",
+                    "percent": 100,
+                    "message": "Done",
+                    "result": res,
+                    "updated_at": datetime.now(timezone.utc)
+                }}
+            )
         except Exception as exc:
-            print(f"[X] Job {job_id} failed: {exc}")
-            job["error"], job["status"] = f"Scrape failed: {exc}", "error"
+            print(f"[X] Scrape Job {job_id} failed: {exc}")
+            db.scrape_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {
+                    "status": "error",
+                    "error": f"Scrape failed: {exc}",
+                    "updated_at": datetime.now(timezone.utc)
+                }}
+            )
+        finally:
+            with _ACTIVE_LOCK:
+                _ACTIVE_CANCEL_EVENTS.pop(job_id, None)
 
     threading.Thread(target=worker, daemon=True, name=f"scrape-{job_id[:6]}").start()
     return job_id
@@ -1659,15 +1641,35 @@ def api_scrape_start():
 def api_scrape_status(job_id):
     if 'user_id' not in session:
         return jsonify({"error": "Unauthorized access"}), 401
-    job = _JOBS.get(job_id)
-    if not job or job["user_id"] != str(session['user_id']):
-        return jsonify({"error": "Search job not found (it may have expired or the server restarted)."}), 404
-    body = {"status": job["status"], "percent": job["percent"], "message": job["message"],
-            "counts": job["counts"], "elapsed": round(time.time() - job["created"], 1)}
-    if job["status"] == "done":
-        body["result"] = job["result"]
-    elif job["status"] == "error":
-        body["error"] = job["error"]
+
+    try:
+        db = get_db()
+        job = db.scrape_jobs.find_one({"job_id": job_id})
+    except Exception as exc:
+        return jsonify({"error": f"Database error checking status: {exc}"}), 500
+
+    if not job or str(job.get("user_id")) != str(session['user_id']):
+        return jsonify({"error": "Search job not found or expired."}), 404
+
+    created_at = job.get("created_at")
+    elapsed = 0.0
+    if created_at:
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        elapsed = round((datetime.now(timezone.utc) - created_at).total_seconds(), 1)
+
+    body = {
+        "status": job.get("status", "running"),
+        "percent": job.get("percent", 0),
+        "message": job.get("message", "Processing..."),
+        "counts": job.get("counts", {}),
+        "elapsed": elapsed
+    }
+    if job.get("status") == "done":
+        body["result"] = job.get("result")
+    elif job.get("status") == "error":
+        body["error"] = job.get("error")
+
     return jsonify(body)
 
 
@@ -1675,17 +1677,26 @@ def api_scrape_status(job_id):
 def api_scrape_cancel(job_id):
     if 'user_id' not in session:
         return jsonify({"error": "Unauthorized access"}), 401
-    job = _JOBS.get(job_id)
-    if not job or job["user_id"] != str(session['user_id']):
+
+    db = get_db()
+    job = db.scrape_jobs.find_one({"job_id": job_id})
+    if not job or str(job.get("user_id")) != str(session['user_id']):
         return jsonify({"error": "Search job not found."}), 404
-    job["cancel"].set()
-    job["message"] = "Cancelling - finishing the current step..."
+
+    with _ACTIVE_LOCK:
+        event = _ACTIVE_CANCEL_EVENTS.get(job_id)
+        if event:
+            event.set()
+
+    db.scrape_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {"message": "Cancelling - finishing current step...", "updated_at": datetime.now(timezone.utc)}}
+    )
     return jsonify({"ok": True})
 
 
 @scraper_bp.route('/api/scrape', methods=['POST'])
 def api_scrape():
-    """Synchronous endpoint kept for compatibility (standard / load-more only). Use /api/scrape/start for Deep Search."""
     if 'user_id' not in session:
         return jsonify({"error": "Unauthorized access"}), 401
     payload = request.get_json(silent=True) or {}
@@ -1727,42 +1738,225 @@ def export_user_scraped_excel():
     )
 
 
+# ==============================================================================
+# ADMIN REPOSITORY ENDPOINTS (ROBUST MULTI-PARAM & WORD BOUNDARY FILTERS)
+# ==============================================================================
+
+_PLATFORM_FILTERS = {
+    "linkedin":  ("LinkedIn",     r"^\s*linkedin\s*$"),
+    "github":    ("GitHub",       r"^\s*git\s*hub\s*$"),
+    "yc":        ("Y Combinator", r"^\s*(y\s*combinator|yc|ycombinator)\s*$"),
+    "wellfound": ("Wellfound",    r"^\s*(wellfound|angel\s*list|angellist)(\s*\(.*\))?\s*$"),
+}
+
+
+def _platform_key(value: str) -> str:
+    v = re.sub(r"[^a-z0-9]", "", (value or "").lower())
+    if not v:
+        return ""
+    if v.startswith("linkedin"):
+        return "linkedin"
+    if v.startswith("github"):
+        return "github"
+    if v in ("yc", "ycombinator") or v.startswith("ycombinator"):
+        return "yc"
+    if v.startswith("wellfound") or v.startswith("angellist") or v == "angel":
+        return "wellfound"
+    return v
+
+
+def _canonical_platform_label(value: str) -> str:
+    key = _platform_key(value)
+    return _PLATFORM_FILTERS[key][0] if key in _PLATFORM_FILTERS else (value or "")
+
+
+def _build_admin_query_filter(search_term: str, platform_filter: str, user_filter: str, has_phone: str, has_email: str) -> dict:
+    and_conditions = []
+
+    # 1. Search Query Filter (Word boundaries for short terms like HR, AI, ML)
+    if search_term:
+        term = search_term.strip()
+        escaped_term = re.escape(term)
+        pattern = f"\\b{escaped_term}\\b" if (len(term) <= 3 and term.isalnum()) else escaped_term
+
+        and_conditions.append({
+            "$or": [
+                {"name": {"$regex": pattern, "$options": "i"}},
+                {"headline": {"$regex": pattern, "$options": "i"}},
+                {"bio": {"$regex": pattern, "$options": "i"}},
+                {"snippet": {"$regex": pattern, "$options": "i"}},
+                {"company": {"$regex": pattern, "$options": "i"}},
+                {"last_query": {"$regex": pattern, "$options": "i"}}
+            ]
+        })
+
+    # 2. Platform Filter
+    pf_key = _platform_key(platform_filter) if platform_filter and platform_filter.strip().lower() not in ('all', 'all platforms', '', 'none') else ""
+    if pf_key:
+        if pf_key in _PLATFORM_FILTERS:
+            pf_regex = _PLATFORM_FILTERS[pf_key][1]
+        else:
+            clean_pf = re.escape(platform_filter.strip())
+            pf_regex = f"^{clean_pf}$"
+
+        if pf_key == "linkedin":
+            and_conditions.append({
+                "$or": [
+                    {"platform": {"$regex": pf_regex, "$options": "i"}},
+                    {"platform": {"$exists": False}},
+                    {"platform": None},
+                    {"platform": ""}
+                ]
+            })
+        else:
+            and_conditions.append({"platform": {"$regex": pf_regex, "$options": "i"}})
+
+    # 3. User ID Filter
+    if user_filter and user_filter.lower() not in ('all', 'all users', '', 'none'):
+        and_conditions.append({"scraped_by_user_id": user_filter.strip()})
+
+    # 4. Phone Filter
+    if str(has_phone).lower() == 'true':
+        and_conditions.append({
+            "$or": [
+                {"contact_numbers.0": {"$exists": True}},
+                {"contact_number": {"$nin": [None, ""]}}
+            ]
+        })
+    elif str(has_phone).lower() == 'false':
+        and_conditions.append({
+            "$and": [
+                {"$or": [{"contact_numbers": {"$exists": False}}, {"contact_numbers": {"$size": 0}}, {"contact_numbers": None}]},
+                {"$or": [{"contact_number": {"$exists": False}}, {"contact_number": None}, {"contact_number": ""}]}
+            ]
+        })
+
+    # 5. Email Filter
+    if str(has_email).lower() == 'true':
+        and_conditions.append({"emails.0": {"$exists": True}})
+    elif str(has_email).lower() == 'false':
+        and_conditions.append({
+            "$or": [
+                {"emails": {"$exists": False}},
+                {"emails": {"$size": 0}},
+                {"emails": None}
+            ]
+        })
+
+    return {"$and": and_conditions} if and_conditions else {}
+
+
+@scraper_bp.route('/api/admin/scraped-data', methods=['GET'])
+def get_admin_scraped_data():
+    if session.get('role') != 'admin' and not session.get('is_admin'):
+        return jsonify({"success": False, "error": "Admin unauthorized"}), 403
+
+    try:
+        db = get_db()
+        page = max(1, int(request.args.get('page', 1)))
+        limit = max(1, int(request.args.get('limit', 20)))
+        skip = (page - 1) * limit
+
+        search_term = (
+            request.args.get('query', '') or 
+            request.args.get('search', '') or 
+            request.args.get('q', '') or 
+            request.args.get('search_term', '')
+        ).strip()
+
+        platform_filter = (
+            request.args.get('platform', '') or 
+            request.args.get('platform_filter', '')
+        ).strip()
+
+        user_filter = (
+            request.args.get('user_id', '') or 
+            request.args.get('user', '') or 
+            request.args.get('scraped_by_user_id', '')
+        ).strip()
+
+        has_phone = (
+            request.args.get('has_phone', '') or 
+            request.args.get('phone', '')
+        ).strip()
+
+        has_email = (
+            request.args.get('has_email', '') or 
+            request.args.get('email', '')
+        ).strip()
+
+        query_filter = _build_admin_query_filter(search_term, platform_filter, user_filter, has_phone, has_email)
+
+        total = db.linkedin_profiles.count_documents(query_filter)
+        profiles = list(
+            db.linkedin_profiles.find(query_filter)
+            .sort("last_scraped_at", -1)
+            .skip(skip)
+            .limit(limit)
+        )
+
+        for p in profiles:
+            p.pop('_id', None)
+
+        available_users = db.linkedin_profiles.distinct("scraped_by_user_id")
+        total_pages = (total + limit - 1) // limit if total > 0 else 1
+
+        return jsonify({
+            "success": True,
+            "profiles": profiles,
+            "total": total,
+            "page": page,
+            "total_pages": total_pages,
+            "available_users": available_users
+        })
+
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @scraper_bp.route('/api/admin/export/excel', methods=['GET', 'POST'])
 def export_admin_global_scraped_excel():
     if session.get('role') != 'admin' and not session.get('is_admin'):
         return jsonify({"error": "Admin unauthorized"}), 403
 
     db = get_db()
-    query_filter = {}
 
-    search_term = request.args.get('search', '').strip() or request.args.get('query', '').strip()
-    user_filter = request.args.get('user_id', '').strip()
-    has_phone = request.args.get('has_phone', '').strip()
-    has_email = request.args.get('has_email', '').strip()
+    search_term = (
+        request.args.get('query', '') or 
+        request.args.get('search', '') or 
+        request.args.get('q', '') or 
+        request.args.get('search_term', '')
+    ).strip()
 
-    if search_term:
-        query_filter["$or"] = [
-            {"name": {"$regex": search_term, "$options": "i"}},
-            {"headline": {"$regex": search_term, "$options": "i"}},
-            {"last_query": {"$regex": search_term, "$options": "i"}}
-        ]
-    if user_filter and user_filter != "all":
-        query_filter["scraped_by_user_id"] = user_filter
-    if has_phone == 'true':
-        query_filter["contact_numbers.0"] = {"$exists": True}
-    elif has_phone == 'false':
-        query_filter["contact_numbers"] = {"$size": 0}
-    if has_email == 'true':
-        query_filter["emails.0"] = {"$exists": True}
-    elif has_email == 'false':
-        query_filter["emails"] = {"$size": 0}
+    platform_filter = (
+        request.args.get('platform', '') or 
+        request.args.get('platform_filter', '')
+    ).strip()
+
+    user_filter = (
+        request.args.get('user_id', '') or 
+        request.args.get('user', '') or 
+        request.args.get('scraped_by_user_id', '')
+    ).strip()
+
+    has_phone = (
+        request.args.get('has_phone', '') or 
+        request.args.get('phone', '')
+    ).strip()
+
+    has_email = (
+        request.args.get('has_email', '') or 
+        request.args.get('email', '')
+    ).strip()
+
+    query_filter = _build_admin_query_filter(search_term, platform_filter, user_filter, has_phone, has_email)
 
     profiles = list(db.linkedin_profiles.find(query_filter).sort("last_scraped_at", -1))
     df = _format_profiles_for_excel(profiles)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Global Leads Repository')
+        df.to_excel(writer, index=False, sheet_name='Global Repository')
     output.seek(0)
 
     return send_file(

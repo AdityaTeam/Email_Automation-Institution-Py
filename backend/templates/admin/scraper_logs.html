@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -14,6 +15,10 @@
             --danger-color: #dc3545;
             --info-color: #17a2b8;
             --warning-color: #ffc107;
+            --yc-color: #ff6600;
+            --github-color: #24292f;
+            --wellfound-color: #e8590c;
+            --linkedin-color: #0a66c2;
         }
 
         body {
@@ -97,14 +102,14 @@
         }
 
         .stats-card .number {
-            font-size: 2rem;
+            font-size: 1.8rem;
             font-weight: 700;
             color: #333;
         }
 
         .stats-card .label {
             color: #666;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
 
         .filter-label {
@@ -154,7 +159,7 @@
         }
 
         .headline-cell {
-            max-width: 260px;
+            max-width: 240px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -163,11 +168,23 @@
         .contact-badge {
             display: inline-block;
             margin: 2px 3px 2px 0;
-            max-width: 220px;
+            max-width: 200px;
             overflow: hidden;
             text-overflow: ellipsis;
             vertical-align: middle;
         }
+
+        /* Platform specific badge styling */
+        .badge-platform {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 5px 10px;
+            border-radius: 6px;
+        }
+        .bg-linkedin { background-color: var(--linkedin-color) !important; color: white; }
+        .bg-github { background-color: var(--github-color) !important; color: white; }
+        .bg-yc { background-color: var(--yc-color) !important; color: white; }
+        .bg-wellfound { background-color: var(--wellfound-color) !important; color: white; }
 
         .pagination .page-link {
             color: var(--primary-color);
@@ -240,9 +257,8 @@
     <div class="container-fluid">
         <div class="row">
 
-            <!-- Sidebar - matched to dashboard.html -->
+            <!-- Sidebar -->
             <div class="col-md-2 sidebar p-0">
-
                 <div class="user-info">
                     <i class="fas fa-user-shield me-2 text-danger"></i>
                     <strong>{{ username }}</strong>
@@ -258,7 +274,6 @@
                     <a class="nav-link" href="/admin/logs"><i class="fas fa-history"></i> Logs</a>
                     <a class="nav-link" href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
                 </nav>
-
             </div>
 
             <!-- Main Content -->
@@ -269,21 +284,17 @@
                 <div class="page-header d-flex justify-content-between align-items-center mb-4">
                     <div>
                         <h2 class="page-title mb-1">
-                            <i class="fas fa-database me-2"></i> Scraped Data
+                            <i class="fas fa-database me-2"></i> Scraped Data Repository
                         </h2>
                         <p class="text-muted mb-0">
-                            Manage and search the global scraped data repository.
+                            Search, filter, and export candidate records collected across all discovery platforms.
                         </p>
                     </div>
                     <div class="actions text-end">
-                        <button class="btn btn-success fw-bold me-2"
-                                onclick="exportAdminDataToExcel()">
-                            <i class="fas fa-file-excel me-1"></i>
-                            Export to Excel
+                        <button class="btn btn-success fw-bold me-2" onclick="exportAdminDataToExcel()">
+                            <i class="fas fa-file-excel me-1"></i> Export to Excel
                         </button>
-
-                        <span class="badge bg-primary px-3 py-2 repository-badge"
-                              id="totalRecordsBadge">
+                        <span class="badge bg-primary px-3 py-2 repository-badge" id="totalRecordsBadge">
                             0 Total Records
                         </span>
                     </div>
@@ -301,9 +312,9 @@
 
                     <div class="col-md-3">
                         <div class="stats-card">
-                            <i class="fas fa-user text-info"></i>
+                            <i class="fas fa-users text-info"></i>
                             <div class="number" id="activeUsersStat">0</div>
-                            <div class="label">Scraping Users</div>
+                            <div class="label">Active Scraping Users</div>
                         </div>
                     </div>
 
@@ -327,21 +338,29 @@
                 <!-- Filter Controls -->
                 <div class="card">
                     <div class="card-header">
-                        <i class="fas fa-filter"></i>
-                        Filter & Search Records
+                        <i class="fas fa-filter"></i> Filter & Search Repository Records
                     </div>
 
                     <div class="card-body">
                         <form id="filterForm" class="row g-3">
-
-                            <div class="col-md-4">
+                            <div class="col-md-3">
                                 <label for="filterQuery" class="form-label filter-label">
-                                    SEARCH QUERY / NAME / EMAIL
+                                    SEARCH QUERY / NAME / ROLE
                                 </label>
-                                <input type="text"
-                                       id="filterQuery"
-                                       class="form-control"
-                                       placeholder="Search name, headline, query...">
+                                <input type="text" id="filterQuery" class="form-control" placeholder="Search name, headline, query...">
+                            </div>
+
+                            <div class="col-md-2">
+                                <label for="filterPlatform" class="form-label filter-label">
+                                    PLATFORM
+                                </label>
+                                <select id="filterPlatform" class="form-select">
+                                    <option value="">All Platforms</option>
+                                    <option value="LinkedIn">LinkedIn</option>
+                                    <option value="GitHub">GitHub</option>
+                                    <option value="Y Combinator">Y Combinator</option>
+                                    <option value="Wellfound">Wellfound</option>
+                                </select>
                             </div>
 
                             <div class="col-md-3">
@@ -353,7 +372,7 @@
                                 </select>
                             </div>
 
-                            <div class="col-md-2">
+                            <div class="col-md-1-5 col-sm-6">
                                 <label for="filterHasPhone" class="form-label filter-label">
                                     HAS PHONE
                                 </label>
@@ -364,7 +383,7 @@
                                 </select>
                             </div>
 
-                            <div class="col-md-2">
+                            <div class="col-md-1-5 col-sm-6">
                                 <label for="filterHasEmail" class="form-label filter-label">
                                     HAS EMAIL
                                 </label>
@@ -376,73 +395,57 @@
                             </div>
 
                             <div class="col-md-1 d-flex align-items-end">
-                                <button type="submit" class="btn btn-primary w-100" title="Search">
+                                <button type="submit" class="btn btn-primary w-100" title="Apply Filters">
                                     <i class="fas fa-search"></i>
                                 </button>
                             </div>
-
                         </form>
                     </div>
                 </div>
 
                 <!-- Data Table -->
                 <div class="card">
-
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>
-                            <i class="fas fa-table"></i>
-                            Scraped Records
+                            <i class="fas fa-table"></i> Repository Profiles
                         </span>
-
                         <span class="small text-muted">
-                            <i class="fas fa-shield-alt me-1"></i>
-                            Admin Repository
+                            <i class="fas fa-shield-alt me-1"></i> Admin Access
                         </span>
                     </div>
 
                     <div class="card-body p-0">
                         <div class="table-responsive">
-
                             <table class="table table-hover align-middle mb-0">
-
                                 <thead>
                                     <tr>
                                         <th>#</th>
+                                        <th>Platform</th>
                                         <th>Profile Name</th>
                                         <th>Headline / Bio</th>
-                                        <th>Discovered Contact</th>
+                                        <th>Contact Info</th>
                                         <th>Scraped By</th>
                                         <th>Last Query</th>
                                         <th>Date Scraped</th>
                                         <th>Action</th>
                                     </tr>
                                 </thead>
-
                                 <tbody id="recordsTbody">
                                     <tr>
-                                        <td colspan="8" class="text-center py-5 text-muted">
-                                            <div class="spinner-border spinner-border-sm text-primary me-2"
-                                                 role="status"></div>
-                                            Loading records...
+                                        <td colspan="9" class="text-center py-5 text-muted">
+                                            <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                                            Loading repository data...
                                         </td>
                                     </tr>
                                 </tbody>
-
                             </table>
-
                         </div>
                     </div>
 
                     <div class="card-footer bg-white d-flex justify-content-between align-items-center">
-
-                        <span class="small text-muted" id="paginationInfo">
-                            Showing page 1
-                        </span>
-
+                        <span class="small text-muted" id="paginationInfo">Showing page 1</span>
                         <ul class="pagination pagination-sm mb-0" id="paginationUl"></ul>
-
                     </div>
-
                 </div>
 
             </div>
@@ -454,6 +457,8 @@
     <script>
         let currentPage = 1;
         const RECORDS_PER_PAGE = 20;
+        let activeRequestId = 0;       // ignore stale responses
+        let activeController = null;   // cancel in-flight requests
 
         document.addEventListener('DOMContentLoaded', () => {
             loadScrapedData(1);
@@ -462,29 +467,52 @@
                 e.preventDefault();
                 loadScrapedData(1);
             });
+
+            // Instant trigger when dropdown filter changes
+            ['filterPlatform', 'filterUserId', 'filterHasPhone', 'filterHasEmail'].forEach(id => {
+                const elem = document.getElementById(id);
+                if (elem) {
+                    elem.addEventListener('change', () => loadScrapedData(1));
+                }
+            });
+
+            // Debounced query input search
+            let searchTimeout;
+            document.getElementById('filterQuery').addEventListener('input', () => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => loadScrapedData(1), 300);
+            });
         });
 
         async function loadScrapedData(page = 1) {
             currentPage = page;
 
             const query = document.getElementById('filterQuery').value.trim();
+            const platform = document.getElementById('filterPlatform').value;
             const userId = document.getElementById('filterUserId').value;
             const hasPhone = document.getElementById('filterHasPhone').value;
             const hasEmail = document.getElementById('filterHasEmail').value;
 
-            const url =
-                `/api/admin/scraped-data?page=${page}` +
+            const url = `/api/admin/scraped-data?page=${page}` +
                 `&limit=${RECORDS_PER_PAGE}` +
                 `&query=${encodeURIComponent(query)}` +
+                `&platform=${encodeURIComponent(platform)}` +
                 `&user_id=${encodeURIComponent(userId)}` +
                 `&has_phone=${hasPhone}` +
                 `&has_email=${hasEmail}`;
 
+            // Cancel any previous in-flight request so an old response can never overwrite the newest filter result
+            if (activeController) activeController.abort();
+            activeController = new AbortController();
+            const requestId = ++activeRequestId;
+
             setLoadingState();
 
             try {
-                const response = await fetch(url);
+                const response = await fetch(url, { signal: activeController.signal, cache: 'no-store' });
                 const data = await response.json();
+
+                if (requestId !== activeRequestId) return; // stale response, ignore
 
                 if (!response.ok || !data.success) {
                     throw new Error(data.error || 'Failed to load scraped data.');
@@ -495,24 +523,22 @@
 
                 const total = Number(data.total || 0);
 
-                document.getElementById('totalRecordsBadge').textContent =
-                    `${total.toLocaleString()} Total Records`;
+                document.getElementById('totalRecordsBadge').textContent = `${total.toLocaleString()} Total Records`;
+                document.getElementById('totalRecordsStat').textContent = total.toLocaleString();
 
-                document.getElementById('totalRecordsStat').textContent =
-                    total.toLocaleString();
-
-                updateFilterStats(data);
+                updateFilterStats();
 
                 if (data.available_users) {
                     populateUserFilter(data.available_users);
                 }
 
             } catch (err) {
+                if (err.name === 'AbortError' || requestId !== activeRequestId) return;
                 console.error('Error fetching scraped data:', err);
 
                 document.getElementById('recordsTbody').innerHTML = `
                     <tr>
-                        <td colspan="8" class="text-center py-5">
+                        <td colspan="9" class="text-center py-5">
                             <div class="text-danger mb-2">
                                 <i class="fas fa-exclamation-triangle fa-2x"></i>
                             </div>
@@ -520,8 +546,7 @@
                             <div class="small text-muted mt-1">
                                 ${escapeHtml(err.message || 'An unexpected error occurred.')}
                             </div>
-                            <button class="btn btn-sm btn-primary mt-3"
-                                    onclick="loadScrapedData(${currentPage})">
+                            <button class="btn btn-sm btn-primary mt-3" onclick="loadScrapedData(${currentPage})">
                                 <i class="fas fa-sync-alt me-1"></i> Retry
                             </button>
                         </td>
@@ -533,9 +558,8 @@
         function setLoadingState() {
             document.getElementById('recordsTbody').innerHTML = `
                 <tr>
-                    <td colspan="8" class="text-center py-5 text-muted">
-                        <div class="spinner-border spinner-border-sm text-primary me-2"
-                             role="status"></div>
+                    <td colspan="9" class="text-center py-5 text-muted">
+                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
                         Loading records...
                     </td>
                 </tr>
@@ -549,9 +573,7 @@
             userSelect.innerHTML = '<option value="">All Users</option>';
 
             availableUsers.forEach(userId => {
-                if (!userId) {
-                    return;
-                }
+                if (!userId) return;
 
                 const option = document.createElement('option');
                 option.value = userId;
@@ -568,14 +590,11 @@
         }
 
         function updateActiveUsersCount(users) {
-            const count = Array.isArray(users)
-                ? users.filter(Boolean).length
-                : 0;
-
+            const count = Array.isArray(users) ? users.filter(Boolean).length : 0;
             document.getElementById('activeUsersStat').textContent = count;
         }
 
-        function updateFilterStats(data) {
+        function updateFilterStats() {
             const hasPhone = document.getElementById('filterHasPhone').value;
             const hasEmail = document.getElementById('filterHasEmail').value;
 
@@ -588,15 +607,36 @@
                 hasEmail === 'false' ? 'No' : 'All';
         }
 
+        function getPlatformBadge(platform) {
+            const pf = (platform || 'LinkedIn').toLowerCase();
+            let icon = 'fas fa-user';
+            let badgeClass = 'bg-secondary';
+
+            if (pf.includes('linkedin')) {
+                icon = 'fab fa-linkedin';
+                badgeClass = 'bg-linkedin';
+            } else if (pf.includes('github')) {
+                icon = 'fab fa-github';
+                badgeClass = 'bg-github';
+            } else if (pf === 'yc' || pf.includes('combinator')) {
+                icon = 'fas fa-cube';
+                badgeClass = 'bg-yc';
+            } else if (pf.includes('wellfound') || pf.includes('angel')) {
+                icon = 'fas fa-rocket';
+                badgeClass = 'bg-wellfound';
+            }
+
+            return `<span class="badge ${badgeClass} badge-platform"><i class="${icon} me-1"></i>${escapeHtml(platform || 'LinkedIn')}</span>`;
+        }
+
         function renderTable(profiles, offset) {
             const tbody = document.getElementById('recordsTbody');
-
             tbody.innerHTML = '';
 
             if (!profiles || profiles.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" class="text-center py-5 text-muted">
+                        <td colspan="9" class="text-center py-5 text-muted">
                             <i class="fas fa-database fa-2x mb-3 d-block"></i>
                             No scraped records found matching the selected criteria.
                         </td>
@@ -608,48 +648,52 @@
             profiles.forEach((p, idx) => {
                 const tr = document.createElement('tr');
 
-                const emailsHtml =
-                    p.emails && p.emails.length
-                        ? p.emails.map(email => `
-                            <span class="badge bg-success contact-badge">
-                                <i class="fas fa-envelope me-1"></i>
-                                ${escapeHtml(email)}
-                            </span>
-                        `).join('')
-                        : '<span class="text-muted small">No Email</span>';
+                const emailsHtml = Array.isArray(p.emails) && p.emails.length
+                    ? p.emails.map(email => `
+                        <span class="badge bg-success contact-badge" title="${escapeHtml(email)}">
+                            <i class="fas fa-envelope me-1"></i>${escapeHtml(email)}
+                        </span>
+                    `).join('')
+                    : '';
 
-                const phonesHtml =
-                    p.contact_numbers && p.contact_numbers.length
-                        ? p.contact_numbers.map(phone => `
-                            <span class="badge bg-info text-dark contact-badge">
-                                <i class="fas fa-phone me-1"></i>
-                                ${escapeHtml(phone)}
-                            </span>
-                        `).join('')
-                        : '';
+                const phonesHtml = Array.isArray(p.contact_numbers) && p.contact_numbers.length
+                    ? p.contact_numbers.map(phone => `
+                        <span class="badge bg-info text-dark contact-badge" title="${escapeHtml(phone)}">
+                            <i class="fas fa-phone me-1"></i>${escapeHtml(phone)}
+                        </span>
+                    `).join('')
+                    : (p.contact_number ? `
+                        <span class="badge bg-info text-dark contact-badge" title="${escapeHtml(p.contact_number)}">
+                            <i class="fas fa-phone me-1"></i>${escapeHtml(p.contact_number)}
+                        </span>
+                    ` : '');
 
-                const profileUrl = p.profile_url || '#';
+                const contactOutput = (emailsHtml || phonesHtml)
+                    ? `${emailsHtml}${phonesHtml}`
+                    : '<span class="text-muted small">No Contact</span>';
+
+                const profileUrl = p.profile_url || p.website || '#';
+                const headlineText = p.headline || p.bio || p.snippet || 'N/A';
 
                 tr.innerHTML = `
                     <td class="text-muted">${offset + idx + 1}</td>
 
+                    <td>${getPlatformBadge(p.platform)}</td>
+
                     <td>
                         <strong class="profile-name">
-                            ${escapeHtml(p.name || 'LinkedIn Profile')}
+                            ${escapeHtml(p.name || 'Candidate Profile')}
                         </strong>
+                        ${p.company ? `<div class="small text-muted"><i class="fas fa-building me-1"></i>${escapeHtml(p.company)}</div>` : ''}
                     </td>
 
                     <td>
-                        <div class="small text-muted headline-cell"
-                             title="${escapeHtml(p.headline || p.snippet || 'N/A')}">
-                            ${escapeHtml(p.headline || p.snippet || 'N/A')}
+                        <div class="small text-muted headline-cell" title="${escapeHtml(headlineText)}">
+                            ${escapeHtml(headlineText)}
                         </div>
                     </td>
 
-                    <td>
-                        ${emailsHtml}
-                        ${phonesHtml}
-                    </td>
+                    <td>${contactOutput}</td>
 
                     <td>
                         <span class="badge bg-secondary">
@@ -672,9 +716,9 @@
                            target="_blank"
                            rel="noopener noreferrer"
                            class="btn btn-sm btn-outline-primary"
-                           title="Open LinkedIn profile"
+                           title="Open profile link"
                            ${profileUrl === '#' ? 'aria-disabled="true"' : ''}>
-                            <i class="fab fa-linkedin"></i>
+                            <i class="fas fa-external-link-alt"></i>
                         </a>
                     </td>
                 `;
@@ -685,18 +729,14 @@
 
         function renderPagination(current, totalPages) {
             const ul = document.getElementById('paginationUl');
-
             ul.innerHTML = '';
 
             current = Number(current) || 1;
             totalPages = Number(totalPages) || 1;
 
-            document.getElementById('paginationInfo').textContent =
-                `Page ${current} of ${totalPages}`;
+            document.getElementById('paginationInfo').textContent = `Page ${current} of ${totalPages}`;
 
-            if (totalPages <= 1) {
-                return;
-            }
+            if (totalPages <= 1) return;
 
             const maxVisiblePages = 7;
             let startPage = Math.max(1, current - 3);
@@ -707,41 +747,21 @@
             }
 
             if (current > 1) {
-                addPaginationItem(
-                    ul,
-                    current - 1,
-                    '<i class="fas fa-chevron-left"></i>',
-                    false,
-                    'Previous page'
-                );
+                addPaginationItem(ul, current - 1, '<i class="fas fa-chevron-left"></i>', false, 'Previous page');
             }
 
             for (let i = startPage; i <= endPage; i++) {
-                addPaginationItem(
-                    ul,
-                    i,
-                    i,
-                    i === current,
-                    `Go to page ${i}`
-                );
+                addPaginationItem(ul, i, i, i === current, `Go to page ${i}`);
             }
 
             if (current < totalPages) {
-                addPaginationItem(
-                    ul,
-                    current + 1,
-                    '<i class="fas fa-chevron-right"></i>',
-                    false,
-                    'Next page'
-                );
+                addPaginationItem(ul, current + 1, '<i class="fas fa-chevron-right"></i>', false, 'Next page');
             }
         }
 
         function addPaginationItem(ul, page, label, active, ariaLabel) {
             const li = document.createElement('li');
-
             li.className = `page-item ${active ? 'active' : ''}`;
-
             li.innerHTML = `
                 <a class="page-link"
                    href="#"
@@ -751,18 +771,18 @@
                     ${label}
                 </a>
             `;
-
             ul.appendChild(li);
         }
 
         function exportAdminDataToExcel() {
             const query = document.getElementById('filterQuery').value.trim();
+            const platform = document.getElementById('filterPlatform').value;
             const userId = document.getElementById('filterUserId').value;
             const hasPhone = document.getElementById('filterHasPhone').value;
             const hasEmail = document.getElementById('filterHasEmail').value;
 
-            const url =
-                `/api/admin/export/excel?query=${encodeURIComponent(query)}` +
+            const url = `/api/admin/export/excel?query=${encodeURIComponent(query)}` +
+                `&platform=${encodeURIComponent(platform)}` +
                 `&user_id=${encodeURIComponent(userId)}` +
                 `&has_phone=${hasPhone}` +
                 `&has_email=${hasEmail}`;
@@ -771,17 +791,13 @@
         }
 
         function formatDate(value) {
-            if (!value) {
-                return 'N/A';
-            }
+            if (!value) return 'N/A';
 
             try {
                 const date = new Date(value);
-
                 if (Number.isNaN(date.getTime())) {
                     return String(value).substring(0, 16).replace('T', ' ');
                 }
-
                 return date.toLocaleString([], {
                     year: 'numeric',
                     month: '2-digit',
@@ -795,10 +811,7 @@
         }
 
         function escapeHtml(value) {
-            if (value === null || value === undefined) {
-                return '';
-            }
-
+            if (value === null || value === undefined) return '';
             return String(value)
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
@@ -810,12 +823,6 @@
         function escapeAttribute(value) {
             return escapeHtml(value);
         }
-    </script>
+</script>
 </body>
 </html>
-'''
-
-out = Path("/mnt/data/scraper_logs_updated.html")
-out.write_text(updated, encoding="utf-8")
-print(out)
-print("lines:", len(updated.splitlines()))
