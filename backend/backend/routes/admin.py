@@ -368,7 +368,7 @@ def get_all_templates():
 @admin_bp.route('/api/admin/templates', methods=['POST'])
 @require_admin
 def add_template():
-    """Add a new template"""
+    """Create an admin-managed template."""
     data = request.form
     files = request.files.getlist('attachments')
     
@@ -412,7 +412,7 @@ def add_template():
 @admin_bp.route('/api/admin/templates/<template_id>', methods=['PUT'])
 @require_admin
 def update_template(template_id):
-    """Update a template"""
+    """Update an admin-managed template."""
     data = request.form
     files = request.files.getlist('attachments')
     
@@ -450,7 +450,7 @@ def update_template(template_id):
 @admin_bp.route('/api/admin/templates/<template_id>', methods=['DELETE'])
 @require_admin
 def delete_template(template_id):
-    """Delete a template"""
+    """Delete an admin-managed template."""
     if Template.delete(template_id):
         return jsonify({'success': True})
     return jsonify({'error': 'Failed to delete template'}), 400

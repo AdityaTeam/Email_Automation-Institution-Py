@@ -268,7 +268,8 @@ class ExcelFile:
     """Excel File model and helper functions"""
     
     @staticmethod
-    def create(user_id, filename, original_filename, recipients):
+    def create(user_id, filename, original_filename, recipients, all_recipients=None,
+               invalid_recipients=None, original_columns=None):
         """Create a new excel file record"""
         db = MongoDB.get_db()
         if db is None:
@@ -279,7 +280,13 @@ class ExcelFile:
             'filename': filename,
             'original_filename': original_filename,
             'recipients_count': len(recipients),
+            'valid_count': len(recipients),
+            'invalid_count': len(invalid_recipients or []),
+            'total_count': len(all_recipients) if all_recipients is not None else len(recipients),
             'recipients': recipients,
+            'all_recipients': all_recipients if all_recipients is not None else recipients,
+            'invalid_recipients': invalid_recipients or [],
+            'original_columns': original_columns or ['Email'],
             'uploaded_at': datetime.utcnow()
         }
         result = db[Collections.EXCEL_FILES].insert_one(file_data)

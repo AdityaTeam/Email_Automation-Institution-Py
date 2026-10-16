@@ -7,6 +7,7 @@ UPDATED: Support for both TLS and SSL connections
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
 from datetime import datetime
 import os 
 import time
@@ -31,6 +32,7 @@ class EmailSender:
         self.server = None  # SMTP Connection Pooling
         self.current_account = None
         self.last_rotation = 0
+        self.last_error = None
         
     def get_current_account(self):
         """Get the current email account to use"""
@@ -106,7 +108,8 @@ class EmailSender:
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
-    def create_email_message(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False):
+    def create_email_message(self, to_email, subject, body, from_name="Sender", cc_emails=None,
+                             attachments=None, is_html=False, inline_logo=None):
         """Create MIME-safe email with plain or HTML body + optional attachments."""
 
         account = self.get_current_account()
@@ -134,7 +137,16 @@ class EmailSender:
             alternative_part = MIMEMultipart('alternative')
             plain_fallback = self._html_to_plain_text(body)
             alternative_part.attach(MIMEText(plain_fallback or body, 'plain', 'utf-8'))
-            alternative_part.attach(MIMEText(body, 'html', 'utf-8'))
+            if inline_logo:
+                related_part = MIMEMultipart('related')
+                related_part.attach(MIMEText(body, 'html', 'utf-8'))
+                image = MIMEImage(inline_logo['data'], _subtype=inline_logo['subtype'])
+                image.add_header('Content-ID', '<company_logo>')
+                image.add_header('Content-Disposition', 'inline', filename=inline_logo['filename'])
+                related_part.attach(image)
+                alternative_part.attach(related_part)
+            else:
+                alternative_part.attach(MIMEText(body, 'html', 'utf-8'))
             msg.attach(alternative_part)
         else:
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
@@ -183,6 +195,7 @@ class EmailSender:
         import socket
         
         if self.current_account is None:
+            self.last_error = "No sender account selected"
             return False
             
         # Rotation cooldown
@@ -203,7 +216,7 @@ class EmailSender:
         try:
             # socket.setdefaulttimeout(120.0)
             smtp_server = self.current_account.get('smtp_server', 'smtp.gmail.com')
-            smtp_port = self.current_account.get('smtp_port', 587)
+            smtp_port = int(self.current_account.get('smtp_port', 587))
             use_ssl = self.current_account.get('use_ssl', False)
             use_tls = self.current_account.get('use_tls', True)
             
@@ -219,15 +232,23 @@ class EmailSender:
                     self.server.ehlo()
             
             self.server.login(self.current_account['email'], self.current_account['password'])
+            self.last_error = None
             print("✅ Pooled connection ready")
             return True
             
-        except Exception as e:
-            print(f"❌ Pool connect failed: {e}")
+        except (smtplib.SMTPException, OSError, ValueError) as e:
+            self.last_error = f"{type(e).__name__}: {e}"
+            print(f"❌ Pool connect failed: {self.last_error}")
+            if self.server:
+                try:
+                    self.server.close()
+                except (smtplib.SMTPException, OSError):
+                    pass
             self.server = None
             return False
     
-    def send_single_email(self, to_email, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False):
+    def send_single_email(self, to_email, subject, body, from_name="Sender", cc_emails=None,
+                          attachments=None, is_html=False, inline_logo=None):
         """Send using pooled connection + validation"""
         import socket
         
@@ -235,7 +256,7 @@ class EmailSender:
         self.current_account = self.get_current_account()
 
         if not self.ensure_connection():
-            print("❌ Cannot establish pooled connection")
+            print(f"❌ Cannot establish pooled connection: {self.last_error or 'unknown SMTP error'}")
             return False
         
         try:
@@ -247,7 +268,8 @@ class EmailSender:
                 from_name,
                 cc_emails,
                 attachments,
-                is_html
+                is_html,
+                inline_logo=inline_logo
             )
             if not msg:
                 return False
@@ -283,15 +305,18 @@ class EmailSender:
             print("❌ All retries exhausted")
             return False
             
-        except Exception as e:
-            print(f"❌ Pool send error: {e}")
+        except (smtplib.SMTPException, OSError, ValueError) as e:
+            self.last_error = f"{type(e).__name__}: {e}"
+            print(f"❌ Pool send error: {self.last_error}")
             self.server = None
             return False
         finally:
             socket.setdefaulttimeout(None)
 
     
-    def send_bulk_emails(self, recipients, subject, body, from_name="Sender", cc_emails=None, attachments=None, is_html=False, delay_between_emails=1, separate_threads=False):
+    def send_bulk_emails(self, recipients, subject, body, from_name="Sender", cc_emails=None,
+                         attachments=None, is_html=False, delay_between_emails=1,
+                         separate_threads=False, inline_logo=None):
         """
         Send emails to multiple recipients with rotation
         
@@ -360,7 +385,8 @@ class EmailSender:
                 from_name,
                 cc_emails=cc_emails,
                 attachments=attachments,
-                is_html=is_html
+                is_html=is_html,
+                inline_logo=inline_logo
             )
             
             if success:
@@ -377,7 +403,7 @@ class EmailSender:
                 current = self.get_current_account()
                 self.failed.append({
                     'email': to_email,
-                    'error': 'Send failed',
+                    'error': self.last_error or 'Send failed',
                     'sender_email_id': current.get('_id') if current else None
                 })
             

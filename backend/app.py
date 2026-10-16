@@ -55,10 +55,15 @@ def server_error(e):
 def create_app():
     """Application factory"""
     # Connect to MongoDB
-    MongoDB.connect()
+    if MongoDB.connect() is None:
+        raise RuntimeError(
+            "MongoDB is unavailable. Start MongoDB on localhost:27017 or set "
+            "MONGO_URI to a reachable MongoDB connection string."
+        )
     
     # Initialize database with default data
-    init_db()
+    if not init_db():
+        raise RuntimeError("MongoDB initialization failed; the application was not started.")
     
     return app
 
@@ -69,10 +74,15 @@ if __name__ == '__main__':
     print("="*60)
     
     # Connect to MongoDB
-    MongoDB.connect()
+    if MongoDB.connect() is None:
+        raise SystemExit(
+            "MongoDB is unavailable. Start MongoDB on localhost:27017 or set "
+            "MONGO_URI to a reachable MongoDB connection string."
+        )
     
     # Initialize database
-    init_db()
+    if not init_db():
+        raise SystemExit("MongoDB initialization failed; the application was not started.")
     
     print("\n📧 Application Routes:")
     print("   - Login: http://localhost:5000/login")
