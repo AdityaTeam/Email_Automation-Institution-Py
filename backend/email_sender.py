@@ -208,8 +208,12 @@ class EmailSender:
                 self.server.noop()
                 self.server.rset()
                 return True
-            except:
+            except (smtplib.SMTPException, OSError):
                 print("🔌 Stale connection → Reconnecting...")
+                try:
+                    self.server.close()
+                except (smtplib.SMTPException, OSError):
+                    pass
                 self.server = None
         
         # Create/connect new pooled connection
@@ -298,8 +302,16 @@ class EmailSender:
                     return True
                 except smtplib.SMTPServerDisconnected as e:
                     print(f"🔄 Pool retry {attempt+1}/3: {e}")
-                    time.sleep(2 ** attempt)  # Exponential backoff
-                    self.ensure_connection()
+                    try:
+                        self.server.close()
+                    except (smtplib.SMTPException, OSError):
+                        pass
+                    self.server = None
+                    if attempt < 2:
+                        time.sleep(2 ** attempt)  # Exponential backoff
+                        if not self.ensure_connection():
+                            print(f"❌ Reconnect failed: {self.last_error or 'unknown SMTP error'}")
+                            continue
                     continue
             
             print("❌ All retries exhausted")
