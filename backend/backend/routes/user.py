@@ -3,16 +3,15 @@ User Panel Routes
 Handles user dashboard, email management, CSV/Excel parsing, verification, and email sending
 """
 
-from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, send_file
 from models import EmailID, ExcelFile, Template, Requirement, Department, EmailLog
-from database import MongoDB, Collections
-from bson import ObjectId
 import os
 import pandas as pd
 import re
 import dns.resolver
-import smtplib
-import socket
+import io
+import base64
+import html
 from werkzeug.utils import secure_filename
 from email_sender import EmailSender
 
@@ -29,6 +28,10 @@ SMTP_CONFIG = {
     'live.com': {'smtp_server': 'smtp.office365.com', 'smtp_port': 587},
     'office365.com': {'smtp_server': 'smtp.office365.com', 'smtp_port': 587},
     'zoho.com': {'smtp_server': 'smtp.zoho.com', 'smtp_port': 587},
+    'zoho.eu': {'smtp_server': 'smtp.zoho.eu', 'smtp_port': 587},
+    'zoho.in': {'smtp_server': 'smtp.zoho.in', 'smtp_port': 587},
+    'zoho.com.au': {'smtp_server': 'smtp.zoho.com.au', 'smtp_port': 587},
+    'zohomail.com': {'smtp_server': 'smtp.zoho.com', 'smtp_port': 587},
     'protonmail.com': {'smtp_server': 'smtp.protonmail.com', 'smtp_port': 587},
     'proton.me': {'smtp_server': 'smtp.protonmail.com', 'smtp_port': 587},
     'gmx.com': {'smtp_server': 'smtp.gmx.com', 'smtp_port': 587},
@@ -44,7 +47,7 @@ SMTP_CONFIG = {
 
 DEFAULT_SMTP = {'smtp_server': 'smtp.gmail.com', 'smtp_port': 587}
 
-EMAIL_REGEX = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+EMAIL_REGEX = r"^[^@\s]+@[^@\s]+$"
 
 # Block non-deliverable documentation and throwaway email domains
 DISALLOWED_DOMAINS = {
@@ -58,8 +61,10 @@ DISALLOWED_DOMAINS = {
 
 def verify_email_smtp(email):
     """
-    Verify email existence using strict regex syntax checks, reserved domain filtering,
-    DNS MX lookups, and SMTP socket verification.
+    Verify email syntax, reserved-domain status, and the recipient domain's MX records.
+
+    DNS can verify that a domain accepts mail, but it cannot reliably prove that a
+    specific mailbox exists. SMTP recipient probing is intentionally not used.
     """
     if not isinstance(email, str):
         return False, "Invalid email type"
@@ -67,7 +72,7 @@ def verify_email_smtp(email):
     email = email.strip()
 
     # 1. Regex Syntax Check BEFORE domain splitting
-    if not re.match(EMAIL_REGEX, email):
+    if not re.fullmatch(EMAIL_REGEX, email):
         return False, "Invalid syntax"
 
     # Safely split domain
@@ -78,7 +83,33 @@ def verify_email_smtp(email):
     domain = parts[1].strip().lower().rstrip('.')
 
     # Domain sanity check to prevent IDNA codec crash
-    if not domain or '..' in domain or domain.startswith('-') or domain.endswith('-'):
+    local_part = parts[0]
+    if (
+        not local_part
+        or len(local_part) > 64
+        or local_part.startswith('.')
+        or local_part.endswith('.')
+        or '..' in local_part
+        or len(domain) > 253
+        or '..' in domain
+        or domain.startswith('-')
+        or domain.endswith('-')
+    ):
+        return False, "Invalid domain format"
+
+    domain_labels = domain.split('.')
+    if (
+        len(domain_labels) < 2
+        or any(
+            not label
+            or len(label) > 63
+            or label.startswith('-')
+            or label.endswith('-')
+            or not re.fullmatch(r'[a-z0-9-]+', label)
+            for label in domain_labels
+        )
+        or len(domain_labels[-1]) < 2
+    ):
         return False, "Invalid domain format"
 
     # 2. Block reserved test / disposable domains immediately
@@ -90,33 +121,18 @@ def verify_email_smtp(email):
         records = dns.resolver.resolve(domain, 'MX')
         if not records or len(records) == 0:
             return False, "No MX records found"
-        mx_host = str(records[0].exchange).rstrip('.')
-    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
         return False, "Domain or MX record does not exist"
-    except Exception as e:
-        return False, f"Domain lookup failed ({type(e).__name__})"
+    except dns.resolver.NoNameservers:
+        return False, "Unable to verify domain MX records (no nameservers)"
+    except dns.resolver.Timeout:
+        return False, "Unable to verify domain MX records (lookup timed out)"
+    except dns.exception.DNSException as e:
+        return False, f"Unable to verify domain MX records ({type(e).__name__})"
 
-    # 4. SMTP Socket Connection & RCPT TO Verification
-    try:
-        server = smtplib.SMTP(timeout=4)
-        server.connect(mx_host, 25)
-        server.helo("verify.local")
-        server.mail("verify@verify.local")
-
-        code, _ = server.rcpt(email)
-        server.quit()
-
-        if code == 250:
-            return True, "Valid/Deliverable"
-        elif code == 550:
-            return False, "Mailbox does not exist"
-        else:
-            return False, f"Rejected with server code {code}"
-
-    except (socket.error, smtplib.SMTPException):
-        # Port 25 is commonly blocked on residential or local networks.
-        # Since MX records exist and domain is not in the blocklist, treat domain as valid.
-        return True, "Valid domain (Port 25 check bypassed)"
+    # MX presence validates the receiving domain. SMTP RCPT probing is deliberately
+    # not used because it is unreliable and can be treated as unsolicited traffic.
+    return True, "Domain accepts mail (MX record found; mailbox not confirmed)"
 
 
 def detect_smtp_settings(email):
@@ -126,7 +142,68 @@ def detect_smtp_settings(email):
     domain = email.split('@')[-1].strip().lower()
     if domain in SMTP_CONFIG:
         return SMTP_CONFIG[domain].copy()
-    return DEFAULT_SMTP.copy()
+    return {}
+
+
+def build_html_signature(signature_data, has_logo=False):
+    """Build a compact, email-client-safe HTML signature."""
+    name = html.escape(signature_data.get('executive_name', '').strip())
+    position = html.escape(signature_data.get('position', '').strip())
+    company = html.escape(signature_data.get('company_name', '').strip())
+    phone = html.escape(signature_data.get('company_phone', '').strip())
+    email_address = signature_data.get('company_email', '').strip()
+    website = signature_data.get('company_website', '').strip()
+    safe_email = html.escape(email_address)
+    safe_website = html.escape(website)
+    website_url = website if website.startswith(('http://', 'https://')) else f'https://{website}'
+    safe_website_url = html.escape(website_url, quote=True)
+
+    contact_rows = []
+    if phone:
+        contact_rows.append(
+            f'<div style="margin-top:7px;color:#475569;">'
+            f'<span style="color:#94a3b8;">T</span>&nbsp; {phone}</div>'
+        )
+    if email_address:
+        contact_rows.append(
+            f'<div style="margin-top:3px;">'
+            f'<span style="color:#94a3b8;">E</span>&nbsp; '
+            f'<a href="mailto:{safe_email}" style="color:#2563eb;text-decoration:none;">'
+            f'{safe_email}</a></div>'
+        )
+    if website:
+        contact_rows.append(
+            f'<div style="margin-top:3px;">'
+            f'<span style="color:#94a3b8;">W</span>&nbsp; '
+            f'<a href="{safe_website_url}" style="color:#2563eb;text-decoration:none;">'
+            f'{safe_website}</a></div>'
+        )
+
+    identity = '<br>'.join(value for value in (name, position, company) if value)
+    logo_cell = ''
+    divider = ''
+    if has_logo:
+        logo_cell = (
+            '<td valign="middle" width="150" style="width:150px;padding:0 22px 0 0;">'
+            '<img src="cid:company_logo" alt="Company logo" width="128" '
+            'style="display:block;width:128px;max-width:128px;height:auto;border:0;">'
+            '</td>'
+        )
+        divider = '<td width="1" style="width:1px;background:#dbe3ec;font-size:1px;line-height:1px;">&nbsp;</td>'
+
+    return (
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+        'style="margin-top:24px;font-family:Arial,Helvetica,sans-serif;color:#1f2937;'
+        'font-size:13px;line-height:1.35;">'
+        '<tr>'
+        f'{logo_cell}{divider}'
+        '<td valign="middle" style="padding:0 0 0 22px;">'
+        '<div style="margin:0 0 8px;color:#64748b;font-size:12px;letter-spacing:.2px;">'
+        'Best regards,</div>'
+        f'<div style="font-size:15px;font-weight:700;color:#111827;">{identity}</div>'
+        + ''.join(contact_rows)
+        + '</td></tr></table>'
+    )
 
 
 def require_login(f):
@@ -185,8 +262,8 @@ def get_email_ids():
 @user_bp.route('/api/email-ids', methods=['POST'])
 @require_login
 def add_email_id():
-    """Add new email ID with auto SMTP detection"""
-    data = request.json
+    """Add a sender account with provider defaults or explicit SMTP settings."""
+    data = request.get_json(silent=True) or {}
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
     
@@ -197,14 +274,37 @@ def add_email_id():
         return jsonify({'error': 'Invalid email address'}), 400
     
     smtp = detect_smtp_settings(email)
+    smtp_server = data.get('smtp_server', '').strip().lower()
+    smtp_port = data.get('smtp_port', 587)
+    use_ssl = bool(data.get('use_ssl', False))
+    use_tls = bool(data.get('use_tls', not use_ssl))
+
+    if smtp_server:
+        if not re.match(r'^[a-zA-Z0-9.-]+$', smtp_server) or '..' in smtp_server:
+            return jsonify({'error': 'Invalid SMTP server hostname'}), 400
+        try:
+            smtp_port = int(smtp_port)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'SMTP port must be a number'}), 400
+        if not 1 <= smtp_port <= 65535:
+            return jsonify({'error': 'SMTP port must be between 1 and 65535'}), 400
+        smtp = {'smtp_server': smtp_server, 'smtp_port': smtp_port}
+    elif not smtp:
+        return jsonify({
+            'error': 'SMTP settings are required for custom domains. '
+                     'Enter the SMTP server and port supplied by your email provider.'
+        }), 400
+
+    if use_ssl:
+        use_tls = False
     
     email_data = {
         'email': email,
         'password': password,
         'smtp_server': smtp['smtp_server'],
-        'smtp_port': smtp['smtp_port'],
-        'use_tls': True,
-        'use_ssl': False
+        'smtp_port': smtp_port if smtp_server else smtp['smtp_port'],
+        'use_tls': use_tls,
+        'use_ssl': use_ssl
     }
     
     result = EmailID.create(session['user_id'], email_data)
@@ -227,6 +327,13 @@ def delete_email_id(email_id):
 def uploads():
     """Upload management page"""
     excel_files = ExcelFile.get_by_user(session['user_id'])
+    for excel_file in excel_files:
+        valid_rows = excel_file.get('recipients', [])
+        invalid_rows = excel_file.get('invalid_recipients', [])
+        all_rows = excel_file.get('all_recipients') or valid_rows + invalid_rows
+        excel_file['valid_count'] = len(valid_rows)
+        excel_file['invalid_count'] = len(invalid_rows)
+        excel_file['total_count'] = len(all_rows)
     return render_template('user/uploads.html',
                            username=session['username'],
                            excel_files=excel_files)
@@ -270,43 +377,43 @@ def upload_file():
             return jsonify({'error': 'Missing Email column'}), 400
         
         name_col = None
-        institute_col = None
         for col in df.columns:
             if col.lower() == 'name':
                 name_col = col
-            if col.lower() == 'institute':
-                institute_col = col
         
         valid_recipients = []
         invalid_recipients = []
+        all_recipients = []
+        original_columns = [
+            column for column in df.columns if column.lower() != 'institute'
+        ]
 
         for _, row in df.iterrows():
             raw_email = row[email_col]
+            email = '' if pd.isna(raw_email) else str(raw_email).strip()
+            recipient = {'email': email}
+            for column in original_columns:
+                value = row[column]
+                if pd.isna(value):
+                    value = ''
+                elif not isinstance(value, (str, int, float, bool)):
+                    value = str(value)
+                recipient.setdefault('original_data', {})[column] = value
+            if name_col and recipient['original_data'].get(name_col):
+                recipient['name'] = str(recipient['original_data'][name_col]).strip()
+            is_valid, reason = verify_email_smtp(email)
+            recipient['status_reason'] = reason
+            recipient['is_valid'] = is_valid
+            all_recipients.append(recipient)
+            (valid_recipients if is_valid else invalid_recipients).append(recipient)
 
-            # Safely handle NaN / Float values from Pandas
-            if pd.isna(raw_email):
-                continue
-
-            email = str(raw_email).strip()
-
-            if email and '@' in email:
-                recipient = {'email': email}
-                if name_col and pd.notna(row[name_col]):
-                    recipient['name'] = str(row[name_col]).strip()
-                if institute_col and pd.notna(row[institute_col]):
-                    recipient['institute'] = str(row[institute_col]).strip()
-                
-                # Verify email existence safely
-                is_valid, reason = verify_email_smtp(email)
-                recipient['status_reason'] = reason
-
-                if is_valid:
-                    valid_recipients.append(recipient)
-                else:
-                    invalid_recipients.append(recipient)
-        
-        # Save ONLY valid recipients into database record
-        excel_file = ExcelFile.create(session['user_id'], filename, file.filename, valid_recipients)
+        excel_file = ExcelFile.create(
+            session['user_id'], filename, file.filename, valid_recipients,
+            all_recipients=all_recipients, invalid_recipients=invalid_recipients,
+            original_columns=original_columns
+        )
+        if excel_file is None:
+            return jsonify({'error': 'Could not save the uploaded file'}), 500
         os.remove(filepath)
         
         return jsonify({
@@ -315,7 +422,11 @@ def upload_file():
             'valid_count': len(valid_recipients),
             'invalid_count': len(invalid_recipients),
             'valid_recipients': valid_recipients,
-            'invalid_recipients': invalid_recipients
+            'invalid_recipients': invalid_recipients,
+            'total_count': len(all_recipients),
+            'validation_percentage': round(
+                (len(valid_recipients) / len(all_recipients) * 100), 1
+            ) if all_recipients else 0
         })
     except Exception as e:
         if os.path.exists(filepath):
@@ -329,14 +440,61 @@ def get_excel_file(file_id):
     """Get single excel file with recipients"""
     file = ExcelFile.get_by_id(file_id)
     
-    if not file:
+    if not file or str(file.get('user_id')) != str(session['user_id']):
         return jsonify({'error': 'File not found'}), 404
     
     # Convert ObjectIds to string
     file['_id'] = str(file['_id'])
     file['user_id'] = str(file['user_id'])
+    # Older records may not have validation metadata. Reconstruct a stable
+    # response from the valid and invalid partitions used for sending/export.
+    valid_rows = file.get('recipients', [])
+    invalid_rows = file.get('invalid_recipients', [])
+    if not file.get('all_recipients'):
+        file['all_recipients'] = valid_rows + invalid_rows
+    file.setdefault('valid_count', len(valid_rows))
+    file.setdefault('invalid_count', len(invalid_rows))
+    file.setdefault('total_count', len(file['all_recipients']))
+    valid_emails = {str(row.get('email', '')).strip().lower() for row in valid_rows}
+    for row in file['all_recipients']:
+        row['is_valid'] = str(row.get('email', '')).strip().lower() in valid_emails
+        row.setdefault(
+            'status_reason',
+            'Domain accepts mail (mailbox not confirmed)'
+            if row['is_valid'] else 'Failed validation'
+        )
     
     return jsonify({'file': file})
+
+
+def _export_recipients(file_id, valid):
+    """Export the selected validation subset while retaining source columns."""
+    file = ExcelFile.get_by_id(file_id)
+    if not file or str(file.get('user_id')) != str(session['user_id']):
+        return jsonify({'error': 'File not found'}), 404
+    rows = file.get('recipients', []) if valid else file.get('invalid_recipients', [])
+    columns = file.get('original_columns') or ['Email', 'Name']
+    columns = [column for column in columns if column.lower() != 'institute']
+    data = [{column: row.get('original_data', {}).get(column, '') for column in columns} for row in rows]
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        pd.DataFrame(data, columns=columns).to_excel(writer, index=False)
+    output.seek(0)
+    suffix = 'valid' if valid else 'invalid'
+    return send_file(output, as_attachment=True, download_name=f'{suffix}_recipients.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@user_bp.route('/api/excel-files/<file_id>/export-valid', methods=['GET'])
+@require_login
+def export_valid_recipients(file_id):
+    return _export_recipients(file_id, True)
+
+
+@user_bp.route('/api/excel-files/<file_id>/export-invalid', methods=['GET'])
+@require_login
+def export_invalid_recipients(file_id):
+    return _export_recipients(file_id, False)
 
 
 @user_bp.route('/api/excel-files/<file_id>', methods=['DELETE'])
@@ -374,7 +532,7 @@ def compose():
 @user_bp.route('/api/templates', methods=['GET'])
 @require_login
 def get_templates():
-    """Get templates"""
+    """Return admin-managed templates for user selection only."""
     requirement_id = request.args.get('requirement_id')
     if requirement_id:
         templates = Template.get_by_requirement(requirement_id)
@@ -422,6 +580,14 @@ def send_emails():
 
     data = request.json
     recipients = data.get('recipients', [])
+    if not isinstance(recipients, list):
+        return jsonify({'error': 'Recipients must be a list'}), 400
+    if isinstance(recipients, list):
+        recipients = [
+            recipient for recipient in recipients
+            if isinstance(recipient, dict) and recipient.get('email')
+            and recipient.get('is_valid', True) is not False
+        ]
     cc_emails = data.get('cc_emails', [])
     sender_email_id = data.get('sender_email_id', '')
     from_name = data.get('from_name', session['username'])
@@ -432,6 +598,7 @@ def send_emails():
     is_html = data.get('is_html', False)
     separate_threads = data.get('separate_threads', True)
     signature_data = data.get('signature_data', {})
+    inline_logo = None
 
     if not isinstance(cc_emails, list):
         cc_emails = []
@@ -451,6 +618,23 @@ def send_emails():
     
     if not recipients or not sender_email_id or not subject or not body:
         return jsonify({'error': 'All fields required'}), 400
+
+    logo_data_url = signature_data.get('logo_data_url')
+    if logo_data_url:
+        match = re.match(r'^data:image/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=]+)$', logo_data_url)
+        if not match:
+            return jsonify({'error': 'Invalid company logo'}), 400
+        try:
+            logo_bytes = base64.b64decode(match.group(2), validate=True)
+        except (ValueError, base64.binascii.Error):
+            return jsonify({'error': 'Invalid company logo data'}), 400
+        if not logo_bytes or len(logo_bytes) > 2 * 1024 * 1024:
+            return jsonify({'error': 'Company logo must be smaller than 2 MB'}), 400
+        subtype = 'jpeg' if match.group(1) in ('jpg', 'jpeg') else match.group(1)
+        inline_logo = {'data': logo_bytes, 'subtype': subtype, 'filename': f'company_logo.{subtype}'}
+        # Inline images require an HTML part; preserve the text body as the
+        # plain-text alternative generated by EmailSender.
+        is_html = True
     
     signature = Template.build_signature(signature_data)
     user_email_ids = EmailID.get_by_user_with_passwords(session['user_id'])
@@ -479,7 +663,7 @@ def send_emails():
     
     if is_html:
         body = Template.process_body(body)
-        signature = Template.process_body(signature)
+        signature = build_html_signature(signature_data, has_logo=inline_logo is not None)
     
     personalized_recipients = []
     for r in recipients:
@@ -487,10 +671,9 @@ def send_emails():
         name = r.get('name', '')
         if name:
             personalized_body = personalized_body.replace('{{name}}', name)
-        institute = r.get('institute', '')
-        if institute:
-            personalized_body = personalized_body.replace('{{institute}}', institute)
-        personalized_body = personalized_body + '\n\n' + signature
+        personalized_body = (
+            personalized_body + ('<br><br>' if is_html else '\n\n') + signature
+        )
         personalized_recipients.append({'email': r['email'], 'body': personalized_body})
     
     try:
@@ -507,7 +690,8 @@ def send_emails():
             attachments=attachments,
             is_html=is_html,
             delay_between_emails=5,
-            separate_threads=separate_threads
+            separate_threads=separate_threads,
+            inline_logo=inline_logo
         )
         
         sent_entries = result.get("sent_entries", [])

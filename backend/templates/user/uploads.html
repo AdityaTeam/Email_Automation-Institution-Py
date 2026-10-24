@@ -95,7 +95,7 @@
                                 <thead>
                                     <tr>
                                         <th>Filename</th>
-                                        <th>Verified Recipients</th>
+                                        <th>Validation Results</th>
                                         <th>Uploaded Date</th>
                                         <th>Actions</th>
                                     </tr>
@@ -104,12 +104,22 @@
                                     {% for file in excel_files %}
                                     <tr>
                                         <td><i class="fas fa-file-excel text-success me-2"></i><strong>{{ file.original_filename }}</strong></td>
-                                        <td><span class="badge bg-success">{{ file.recipients_count }} Valid Recipients</span></td>
+                                        <td>
+                                            <span class="badge bg-success">{{ file.valid_count if file.valid_count is defined else file.recipients|length }} Valid</span>
+                                            <span class="badge bg-danger">{{ file.invalid_count if file.invalid_count is defined else file.invalid_recipients|length }} Invalid</span>
+                                            <span class="badge bg-secondary">{{ file.total_count if file.total_count is defined else (file.all_recipients|length) }} Total</span>
+                                        </td>
                                         <td>{{ file.created_at.strftime('%Y-%m-%d %H:%M') if file.created_at else 'N/A' }}</td>
                                         <td>
                                             <button class="btn btn-sm btn-outline-primary me-1" onclick="viewFileRecipients('{{ file._id }}')">
                                                 <i class="fas fa-eye me-1"></i> View
                                             </button>
+                                            <a class="btn btn-sm btn-outline-success me-1" href="/api/excel-files/{{ file._id }}/export-valid">
+                                                <i class="fas fa-download me-1"></i> Valid
+                                            </a>
+                                            <a class="btn btn-sm btn-outline-warning me-1" href="/api/excel-files/{{ file._id }}/export-invalid">
+                                                <i class="fas fa-download me-1"></i> Invalid
+                                            </a>
                                             <button class="btn btn-sm btn-outline-danger" onclick="deleteFile('{{ file._id }}')">
                                                 <i class="fas fa-trash me-1"></i> Delete
                                             </button>
@@ -155,7 +165,7 @@
                             <p class="text-muted small">These emails passed syntax, DNS MX record, and SMTP verification. They are saved for bulk composition.</p>
                             <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
                                 <table class="table table-sm table-striped">
-                                    <thead><tr><th>#</th><th>Email</th><th>Name</th><th>Institute</th><th>Status</th></tr></thead>
+                                    <thead><tr><th>#</th><th>Email</th><th>Name</th><th>Status</th></tr></thead>
                                     <tbody id="validRecipientsTbody"></tbody>
                                 </table>
                             </div>
@@ -185,13 +195,13 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="fas fa-users text-primary me-2"></i> Verified File Recipients</h5>
+                    <h5 class="modal-title"><i class="fas fa-users text-primary me-2"></i> File Recipients</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
                         <table class="table table-striped">
-                            <thead><tr><th>#</th><th>Email</th><th>Name</th><th>Institute</th></tr></thead>
+                            <thead><tr><th>#</th><th>Email</th><th>Name</th><th>Status</th><th>Reason</th></tr></thead>
                             <tbody id="fileRecipientsTbody"></tbody>
                         </table>
                     </div>
@@ -248,11 +258,11 @@
                     currentVerificationData = data;
                     
                     document.getElementById('uploadResultCard').style.display = 'block';
-                    document.getElementById('uploadResultSummary').textContent = `Processed ${file.name}. Valid emails have been saved to your account.`;
+                    document.getElementById('uploadResultSummary').textContent = `Processed ${file.name}. Valid and invalid emails have been saved separately to your account.`;
                     document.getElementById('validCountBadge').textContent = `${data.valid_count} Valid`;
                     document.getElementById('invalidCountBadge').textContent = `${data.invalid_count} Fake/Invalid`;
 
-                    showAlert('success', `Verification complete! ${data.valid_count} valid emails saved, ${data.invalid_count} fake/invalid emails filtered.`);
+                    showAlert('success', `Verification complete! ${data.valid_count} valid and ${data.invalid_count} invalid emails saved separately.`);
                     
                     // Show detailed verification modal automatically
                     showVerificationModal(data);
@@ -284,11 +294,11 @@
             if (data.valid_recipients && data.valid_recipients.length > 0) {
                 data.valid_recipients.forEach((r, idx) => {
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `<td>${idx + 1}</td><td><strong>${r.email}</strong></td><td>${r.name || '-'}</td><td>${r.institute || '-'}</td><td><span class="badge bg-success">Deliverable</span></td>`;
+                    tr.innerHTML = `<td>${idx + 1}</td><td><strong>${r.email}</strong></td><td>${r.name || '-'}</td><td><span class="badge bg-success">Domain accepts mail</span></td>`;
                     validTbody.appendChild(tr);
                 });
             } else {
-                validTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No valid recipients found</td></tr>';
+                validTbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No valid recipients found</td></tr>';
             }
 
             const invalidTbody = document.getElementById('invalidRecipientsTbody');
@@ -317,12 +327,18 @@
                 const response = await fetch(`/api/excel-files/${fileId}`);
                 const data = await response.json();
                 
-                if (data.file && data.file.recipients) {
+                if (data.file) {
                     const tbody = document.getElementById('fileRecipientsTbody');
                     tbody.innerHTML = '';
-                    data.file.recipients.forEach((r, idx) => {
+                    const validEmails = new Set((data.file.recipients || []).map(r => String(r.email || '').trim().toLowerCase()));
+                    const rows = data.file.all_recipients || [
+                        ...(data.file.recipients || []),
+                        ...(data.file.invalid_recipients || [])
+                    ];
+                    rows.forEach((r, idx) => {
+                        const isValid = validEmails.has(String(r.email || '').trim().toLowerCase());
                         const tr = document.createElement('tr');
-                        tr.innerHTML = `<td>${idx + 1}</td><td><strong>${r.email}</strong></td><td>${r.name || '-'}</td><td>${r.institute || '-'}</td>`;
+                        tr.innerHTML = `<td>${idx + 1}</td><td><strong>${r.email || '-'}</strong></td><td>${r.name || '-'}</td><td><span class="badge ${isValid ? 'bg-success' : 'bg-danger'}">${isValid ? 'Valid' : 'Invalid'}</span></td><td>${r.status_reason || (isValid ? 'Domain accepts mail' : 'Failed validation')}</td>`;
                         tbody.appendChild(tr);
                     });
                     new bootstrap.Modal(document.getElementById('fileRecipientsModal')).show();

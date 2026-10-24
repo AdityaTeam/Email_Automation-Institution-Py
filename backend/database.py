@@ -4,14 +4,14 @@ Handles connection to MongoDB and database operations
 """
 
 from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
+from pymongo.errors import PyMongoError
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # MongoDB Configuration
-MONGO_URI = os.getenv('MONGO_URI')
+MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
 DATABASE_NAME = os.getenv('DATABASE_NAME', 'bulk_email_sender')
 
 class MongoDB:
@@ -24,14 +24,25 @@ class MongoDB:
     def connect(cls):
         """Connect to MongoDB"""
         try:
-            cls._client = MongoClient(MONGO_URI)
+            cls._client = MongoClient(
+                MONGO_URI,
+                serverSelectionTimeoutMS=int(os.getenv('MONGO_TIMEOUT_MS', '5000')),
+            )
             cls._db = cls._client[DATABASE_NAME]
             # Test connection
             cls._client.admin.command('ping')
             print(f"✅ Connected to MongoDB: {DATABASE_NAME}")
             return cls._db
-        except ConnectionFailure as e:
-            print(f"❌ Failed to connect to MongoDB: {e}")
+        except (PyMongoError, ValueError) as e:
+            if cls._client:
+                cls._client.close()
+            cls._client = None
+            cls._db = None
+            print(
+                "❌ Failed to connect to MongoDB. "
+                f"Check MONGO_URI ({MONGO_URI}) and ensure MongoDB is running. "
+                f"Details: {e}"
+            )
             return None
     
     @classmethod
@@ -81,6 +92,10 @@ def init_db():
     """Initialize database with default admin and templates"""
     db = MongoDB.get_db()
     if db is None:
+        print(
+            "❌ Database initialization skipped: MongoDB is unavailable. "
+            "Start MongoDB or configure MONGO_URI before starting the app."
+        )
         return False
     
     # Create indexes
@@ -123,10 +138,10 @@ def init_db():
                 default_templates.append({
                     'requirement_id': req['_id'],
                     'name': 'Admission Inquiry',
-                    'subject': 'Admission Open for 2024 - {{institute}}',
+                    'subject': 'Admission Open for 2024',
                     'body': '''Dear {{name}},
 
-We are pleased to inform you that admissions are now open for the upcoming academic year at {{institute}}.
+We are pleased to inform you that admissions are now open for the upcoming academic year.
 
 Our institution offers a wide range of courses with excellent faculty and infrastructure.
 
@@ -140,21 +155,21 @@ For more information, please visit our website or contact us.
 
 Best regards,
 Admissions Team
-{{institute}}''',
+Admissions Team''',
                     'is_active': True
                 })
             elif req['name'] == 'Event':
                 default_templates.append({
                     'requirement_id': req['_id'],
                     'name': 'Event Invitation',
-                    'subject': "You're Invited! - {{institute}}",
+                    'subject': "You're Invited!",
                     'body': '''Dear {{name}},
 
 We are excited to invite you to our upcoming event!
 
 Event Details:
 - Date: Coming Soon
-- Venue: {{institute}}
+- Venue: To be announced
 
 This is a great opportunity to explore our campus and interact with our faculty.
 
@@ -162,17 +177,17 @@ We look forward to seeing you there!
 
 Warm regards,
 Event Coordinator
-{{institute}}''',
+Event Coordinator''',
                     'is_active': True
                 })
             elif req['name'] == 'Newsletter':
                 default_templates.append({
                     'requirement_id': req['_id'],
                     'name': 'Monthly Newsletter',
-                    'subject': 'Newsletter - {{institute}}',
+                    'subject': 'Monthly Newsletter',
                     'body': '''Dear {{name}},
 
-Welcome to our monthly newsletter from {{institute}}!
+Welcome to our monthly newsletter!
 
 This Month's Highlights:
 - Academic achievements
@@ -183,7 +198,7 @@ This Month's Highlights:
 Stay connected with us for more updates!
 
 Best wishes,
-{{institute}} Team''',
+Newsletter Team''',
                     'is_active': True
                 })
         
@@ -200,14 +215,14 @@ Best wishes,
             'subject': 'Regarding Your Inquiry',
             'body': '''Dear {{name}},
 
-Thank you for your interest in {{institute}}.
+Thank you for your interest.
 
 We would like to inform you that our team is ready to assist you with all your queries.
 
 Please feel free to reach out to us for any further information.
 
 Best regards,
-{{institute}}''',
+Support Team''',
             'is_active': True
         })
         

@@ -27,6 +27,7 @@
         .template-info { background: #e7f3ff; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9rem; }
         .signature-preview { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #dee2e6; font-family: monospace; white-space: pre-wrap; margin-top: 10px; }
         .preview-rich-container { background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; max-height: 60vh; overflow-y: auto; }
+        .logo-preview { max-width: 180px; max-height: 80px; object-fit: contain; border: 1px solid #dee2e6; border-radius: 6px; padding: 4px; }
     </style>
 </head>
 <body>
@@ -130,6 +131,17 @@
                                             <small class="text-muted">Optional - overrides username in From header</small>
                                         </div>
                                     </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label">Company Logo</label>
+                                            <input type="file" class="form-control" id="companyLogo" accept="image/png,image/jpeg,image/gif,image/webp">
+                                            <div class="form-text">Optional, max 2 MB. It is embedded securely in HTML emails.</div>
+                                            <div class="mt-2 d-none" id="logoPreviewWrap">
+                                                <img class="logo-preview" id="logoPreview" alt="Company logo preview">
+                                                <button type="button" class="btn btn-sm btn-outline-danger ms-2" id="removeLogoBtn">Remove</button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="template-info" id="templateInfo" style="display: none;">
                                     <i class="fas fa-info-circle"></i> <span id="templateInfoText"></span>
@@ -139,7 +151,7 @@
 
                         <!-- DYNAMIC TEMPLATE CONTENT FIELDS -->
                         <div class="card" id="dynamicFieldsCard" style="display: none;">
-                            <div class="card-header"><i class="fas fa-sliders-h text-primary"></i> Template Content Customization</div>
+                            <div class="card-header"><i class="fas fa-sliders-h text-primary"></i> Email Content Customization</div>
                             <div class="card-body">
                                 <div class="mb-3" id="bannerUploadGroup">
                                     <label class="form-label fw-bold"><i class="fas fa-image me-1 text-primary"></i> Top Banner Image</label>
@@ -168,7 +180,7 @@
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label">Email Body (Text or HTML)</label>
-                                    <small class="text-muted d-block mb-2">Use <code>{{name}}</code> for recipient name, <code>{{institute}}</code> for institute name</small>
+                                    <small class="text-muted d-block mb-2">Use <code>{{name}}</code> for recipient name</small>
                                     <textarea class="form-control" id="emailBody" rows="10" placeholder="Select a template or type custom HTML/text..."></textarea>
                                 </div>
                                 
@@ -260,7 +272,6 @@ Best Regards,
                                 {% endif %}
                             </div>
                         </div>
-                        
                         <div class="card">
                             <div class="card-header d-flex justify-content-between align-items-center">
                                 <span><i class="fas fa-users"></i> Recipients</span>
@@ -269,7 +280,7 @@ Best Regards,
                             <div class="card-body recipient-table" id="recipientTableContainer">
                                 <p class="text-muted text-center py-4" id="noRecipients"><i class="fas fa-inbox fa-2x"></i><br>Select a file to see recipients</p>
                                 <table class="table table-striped" id="recipientTable" style="display: none;">
-                                    <thead><tr><th>#</th><th>Email</th><th>Name</th><th>Institute</th></tr></thead>
+                                    <thead><tr><th>#</th><th>Email</th><th>Name</th></tr></thead>
                                     <tbody id="recipientTableBody"></tbody>
                                 </table>
                             </div>
@@ -324,6 +335,8 @@ Best Regards,
     <script>
         let recipients = [];
         let uploadedBannerDataUrl = null;
+        let companyLogoDataUrl = null;
+        let selectedRecipientsFileId = null;
         let ccCheckboxes = [];
         
         function updateSignaturePreview() {
@@ -359,6 +372,30 @@ ${companyWebsite}`;
                 };
                 reader.readAsDataURL(file);
             }
+        });
+
+        document.getElementById('companyLogo').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (file.size > 2 * 1024 * 1024) {
+                this.value = '';
+                showAlert('warning', 'Company logo must be smaller than 2 MB');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                companyLogoDataUrl = evt.target.result;
+                document.getElementById('logoPreview').src = companyLogoDataUrl;
+                document.getElementById('logoPreviewWrap').classList.remove('d-none');
+            };
+            reader.readAsDataURL(file);
+        });
+
+        document.getElementById('removeLogoBtn').addEventListener('click', function() {
+            companyLogoDataUrl = null;
+            document.getElementById('companyLogo').value = '';
+            document.getElementById('logoPreview').removeAttribute('src');
+            document.getElementById('logoPreviewWrap').classList.add('d-none');
         });
         
         const requirementSelect = document.getElementById('requirementSelect');
@@ -417,23 +454,22 @@ ${companyWebsite}`;
         document.getElementById('templateSelect').addEventListener('change', function() {
             const selectedOption = this.options[this.selectedIndex];
             const dynamicCard = document.getElementById('dynamicFieldsCard');
+            const subjectInput = document.getElementById('emailSubject');
+            const bodyInput = document.getElementById('emailBody');
 
             if (selectedOption && selectedOption.value) {
                 const bodyContent = selectedOption.dataset.body || '';
-                document.getElementById('emailSubject').value = selectedOption.dataset.subject || '';
-                document.getElementById('emailBody').value = bodyContent;
-                
-                // Show dynamic customization inputs for HTML / Layout templates
-                if (bodyContent.includes('<img') || bodyContent.includes('<a') || bodyContent.includes('<table') || bodyContent.includes('<!DOCTYPE html')) {
-                    dynamicCard.style.display = 'block';
-                    document.getElementById('htmlFormat').checked = true;
-                } else {
-                    dynamicCard.style.display = 'none';
-                }
+                subjectInput.value = selectedOption.dataset.subject || '';
+                bodyInput.value = bodyContent;
+                subjectInput.readOnly = true;
+                bodyInput.readOnly = true;
+                dynamicCard.style.display = 'none';
 
                 document.getElementById('templateInfo').style.display = 'block';
-                document.getElementById('templateInfoText').textContent = 'Template loaded. You can edit subject, text, image, links, and signature details before sending.';
+                document.getElementById('templateInfoText').textContent = 'Admin template loaded for viewing and sending. Template content can only be changed by an administrator.';
             } else {
+                subjectInput.readOnly = false;
+                bodyInput.readOnly = false;
                 dynamicCard.style.display = 'none';
                 document.getElementById('templateInfo').style.display = 'none';
             }
@@ -464,7 +500,7 @@ ${companyWebsite}`;
 
         document.getElementById('previewBtn').addEventListener('click', function() {
             const subject = document.getElementById('emailSubject').value;
-            const isHtml = document.getElementById('htmlFormat').checked;
+            const isHtml = document.getElementById('htmlFormat').checked || Boolean(companyLogoDataUrl);
 
             if (!subject) {
                 showAlert('warning', 'Please enter a subject or select a template');
@@ -484,15 +520,18 @@ ${companyWebsite}`;
             if (isHtml) {
                 const compiledBody = getCompiledBody();
                 const htmlSignature = `
-                    <div style="margin-top: 25px; padding-top: 15px; border-top: 1px dashed #cccccc; color: #555555; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.5;">
-                        <strong>Best Regards,</strong><br>
-                        ${executiveName}<br>
-                        ${position}<br>
-                        <strong>${companyName}</strong><br>
-                        Phone: ${companyPhone}<br>
-                        Email: <a href="mailto:${companyEmail}" style="color: #4a90d9;">${companyEmail}</a><br>
-                        Web: <a href="http://${companyWebsite}" target="_blank" style="color: #4a90d9;">${companyWebsite}</a>
-                    </div>
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;color:#1f2937;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.35;">
+                        <tr>
+                            ${companyLogoDataUrl ? `<td valign="middle" width="150" style="width:150px;padding:0 22px 0 0;"><img src="${companyLogoDataUrl}" alt="Company logo" style="display:block;width:128px;max-width:128px;height:auto;"></td><td width="1" style="width:1px;background:#dbe3ec;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}
+                            <td valign="middle" style="padding:0 0 0 ${companyLogoDataUrl ? '22px' : '0'};">
+                                <div style="margin:0 0 8px;color:#64748b;font-size:12px;letter-spacing:.2px;">Best regards,</div>
+                                <div style="font-size:15px;font-weight:700;color:#111827;">${executiveName}<br>${position}<br>${companyName}</div>
+                                <div style="margin-top:7px;color:#475569;">${companyPhone ? `T&nbsp; ${companyPhone}` : ''}</div>
+                                <div style="margin-top:3px;">${companyEmail ? `E&nbsp; <a href="mailto:${companyEmail}" style="color:#2563eb;text-decoration:none;">${companyEmail}</a>` : ''}</div>
+                                <div style="margin-top:3px;">${companyWebsite ? `W&nbsp; <a href="${companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`}" style="color:#2563eb;text-decoration:none;">${companyWebsite}</a>` : ''}</div>
+                            </td>
+                        </tr>
+                    </table>
                 `;
                 previewContainer.style.whiteSpace = 'normal';
                 previewContainer.innerHTML = compiledBody + htmlSignature;
@@ -507,15 +546,19 @@ ${companyWebsite}`;
         
         document.getElementById('fileSelect').addEventListener('change', async function() {
             const fileId = this.value;
+            selectedRecipientsFileId = fileId || null;
             if (!fileId) { recipients = []; updateRecipientDisplay(); return; }
             
             try {
                 const response = await fetch(`/api/excel-files/${fileId}`);
                 const data = await response.json();
-                if (data.file) { recipients = data.file.recipients; updateRecipientDisplay(); }
+                if (data.file) {
+                    recipients = data.file.recipients || [];
+                    updateRecipientDisplay();
+                }
             } catch (error) { console.error('Error loading file:', error); showAlert('danger', 'Error loading file'); }
         });
-        
+
         function updateRecipientDisplay() {
             const countEl = document.getElementById('recipientCount');
             const noRecipientsEl = document.getElementById('noRecipients');
@@ -531,13 +574,13 @@ ${companyWebsite}`;
             
             recipients.slice(0, 100).forEach((r, index) => {
                 const row = document.createElement('tr');
-                row.innerHTML = `<td>${index + 1}</td><td>${r.email}</td><td>${r.name || '-'}</td><td>${r.institute || '-'}</td>`;
+                row.innerHTML = `<td>${index + 1}</td><td>${r.email}</td><td>${r.name || '-'}</td>`;
                 tbodyEl.appendChild(row);
             });
             
             if (recipients.length > 100) {
                 const moreRow = document.createElement('tr');
-                moreRow.innerHTML = `<td colspan="4" class="text-muted">...and ${recipients.length - 100} more</td>`;
+                moreRow.innerHTML = `<td colspan="3" class="text-muted">...and ${recipients.length - 100} more</td>`;
                 tbodyEl.appendChild(moreRow);
             }
         }
@@ -612,7 +655,7 @@ ${companyWebsite}`;
             const senderEmailId = document.getElementById('senderSelect').value;
             const fileId = document.getElementById('fileSelect').value;
             const subject = document.getElementById('emailSubject').value;
-            const isHtml = document.getElementById('htmlFormat').checked;
+            const isHtml = document.getElementById('htmlFormat').checked || Boolean(companyLogoDataUrl);
             const ccEmailsHidden = document.getElementById('ccEmailsHidden').value;
             const ccEmails = ccEmailsHidden ? ccEmailsHidden.split(',').filter(email => email.trim()) : [];
             
@@ -629,7 +672,8 @@ ${companyWebsite}`;
                 company_name: document.getElementById('companyName').value,
                 company_email: document.getElementById('companyEmail').value,
                 company_phone: document.getElementById('companyPhone').value,
-                company_website: document.getElementById('companyWebsite').value
+                company_website: document.getElementById('companyWebsite').value,
+                logo_data_url: companyLogoDataUrl
             };
             
             setSendingState(true);
