@@ -36,7 +36,8 @@
             <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
                 <span class="visually-hidden">Loading...</span>
             </div>
-            <p class="mt-3">Sending emails...</p>
+            <p class="mt-3 mb-1" id="loadingMessage">Sending emails...</p>
+            <small class="text-muted" id="loadingDetail">Please wait until all recipients are processed.</small>
         </div>
     </div>
 
@@ -685,6 +686,9 @@ ${companyWebsite}`;
             document.getElementById('progressBar').style.width = '0%';
             document.getElementById('progressBar').textContent = '0%';
             renderFailedEmails([]);
+            document.getElementById('loadingMessage').textContent = 'Sending emails...';
+            document.getElementById('loadingDetail').textContent =
+                `Please wait until all ${recipients.length} recipients are processed.`;
             
             try {
                 const selectedTemplate = document.getElementById('templateSelect').value;
@@ -710,11 +714,25 @@ ${companyWebsite}`;
                     throw new Error(data.error || 'Error sending emails');
                 }
 
-                document.getElementById('sentCount').textContent = data.sent;
-                document.getElementById('failedCount').textContent = data.failed;
-                document.getElementById('progressBar').style.width = '100%';
-                document.getElementById('progressBar').textContent = '100%';
+                const sent = Number.isFinite(Number(data.sent)) ? Number(data.sent) : 0;
+                const failed = Number.isFinite(Number(data.failed)) ? Number(data.failed) : 0;
+                const total = Number.isFinite(Number(data.total)) ? Number(data.total) : recipients.length;
+                const completed = Number.isFinite(Number(data.completed))
+                    ? Number(data.completed)
+                    : sent + failed;
+                const percent = total > 0
+                    ? Math.min(100, Math.round((completed / total) * 100))
+                    : 100;
+
+                document.getElementById('sentCount').textContent = sent;
+                document.getElementById('failedCount').textContent = failed;
+                document.getElementById('totalCount').textContent = total;
+                document.getElementById('progressBar').style.width = `${percent}%`;
+                document.getElementById('progressBar').textContent = `${percent}%`;
                 renderFailedEmails(data.failed_list || []);
+                document.getElementById('loadingMessage').textContent = 'Sending complete';
+                document.getElementById('loadingDetail').textContent =
+                    `${sent} sent, ${failed} failed out of ${total} recipients.`;
 
                 if (Array.isArray(data.email_usage)) {
                     renderEmailUsage(data.email_usage, senderEmailId);
@@ -730,6 +748,9 @@ ${companyWebsite}`;
                 showAlert('success', `Successfully sent ${data.sent} emails. Failed: ${data.failed}.`);
             } catch (error) {
                 console.error('Send error:', error);
+                document.getElementById('loadingMessage').textContent = 'Sending stopped';
+                document.getElementById('loadingDetail').textContent =
+                    'The server could not complete the sending request.';
                 showAlert('danger', error.message || 'Network error. Check console.');
             } finally {
                 setSendingState(false);

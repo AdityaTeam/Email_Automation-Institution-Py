@@ -734,6 +734,8 @@ def send_emails():
             'success': True,
             'sent': sent_count,
             'failed': len(failed_list),
+            'total': len(recipients),
+            'completed': sent_count + len(failed_list),
             'failed_list': failed_list,
             'dashboard_stats': stats,
             'email_usage': email_usage,
